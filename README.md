@@ -1,32 +1,28 @@
 # Weeeking 🛡️
 
-> *Weeek and conquer.* MCP-сервер для [Weeek](https://weeek.net) с **полным покрытием публичного API**: тулы генерируются из
-> официальной OpenAPI-спецификации (157 операций — задачи, проекты, доски, кастомные поля, время, CRM,
-> организации, контакты и т.д.), плюс удобный «curated» слой для повседневной работы.
-
-**Read-only по умолчанию:** изменяющие операции не регистрируются, пока вы явно не выставите `READ_ONLY=false`.
+> *Weeek and conquer.* MCP-сервер для [Weeek](https://weeek.net) с **полным покрытием публичного API**:
+> 157 операций из официальной OpenAPI-спецификации. Один бинарник на Rust, без Node и внешних зависимостей
+> в рантайме. Целевые платформы пилота: **Windows x86_64 и Linux x86_64**.
 
 ## Возможности
 
-- **Генерация из первоисточника.** `npm run update:openapi` тянет актуальную спецификацию с
-  developers.weeek.net (она лежит в чанках сайта) и пересобирает `src/generated/operations.ts`.
-- **13 админ-групп** (`weeek_project`, `weeek_board`, `weeek_board_column`, `weeek_custom_fields`,
-  `weeek_portfolio`, `weeek_tags`, `weeek_funnels`, `weeek_funnel_statuses`, `weeek_deals`,
-  `weeek_organizations`, `weeek_contacts`, `weeek_currencies`, `weeek_task`): каждая — один тул с
-  параметром `action` (например `weeek_project` → `create-project`, `archive-project`, …).
-- **Curated-тулы** для ежедневной работы: `weeek_context`, `weeek_search_tasks`, `weeek_get_task`,
+- **13 админ-групп с `action`** — `weeek_project`, `weeek_board`, `weeek_board_column`, `weeek_custom_fields`,
+  `weeek_portfolio`, `weeek_tags`, `weeek_task` (таймеры, записи времени, вложения, родитель…), `weeek_funnels`,
+  `weeek_funnel_statuses`, `weeek_deals`, `weeek_organizations`, `weeek_contacts`, `weeek_currencies`.
+- **12 curated-тулов** для повседневной работы: `weeek_context`, `weeek_search_tasks`, `weeek_get_task`,
   `weeek_list_comments`, `weeek_download_attachment` + записи (`weeek_create_task`, `weeek_update_task`,
   `weeek_move_task`, `weeek_complete_task`, `weeek_set_task_people`, `weeek_add_comment`, `weeek_delete_comment`).
-- **Безопасность:** токен только в заголовке запроса (не логируется), лимит на размер ответа
-  (`WEEEK_MAX_RESPONSE_CHARS`, по умолчанию 60 000 символов), ошибки API возвращаются как `isError`
-  с HTTP-кодом и телом, stderr — только диагностика.
+- **READ_ONLY по умолчанию**: изменяющие действия не регистрируются, пока не выставлено `READ_ONLY=false`.
+- **Спека вшита в бинарник**: `spec/operations.json` генерируется из первоисточника (developers.weeek.net)
+  скриптом `tools/update-spec.mjs` и попадает в сборку через `include_str!`.
 
-## Установка
+## Сборка
+
+Требуется Rust 1.88+ (MSVC toolchain на Windows).
 
 ```bash
-npm install
-npm run build        # typecheck + esbuild → dist/server.mjs
-node dist/server.mjs # stdio MCP-сервер
+cargo build --release
+# → target/release/weeeking.exe (Windows) / target/release/weeeking (Linux)
 ```
 
 ## Переменные окружения
@@ -43,50 +39,44 @@ node dist/server.mjs # stdio MCP-сервер
 ### Откуда берётся токен
 
 1. `WEEEK_API_TOKEN` (или `WEEEK_TOKEN`) из окружения — приоритет всегда за ним.
-2. Если переменной нет — токен читается из системного хранилища (Windows Credential Manager,
-   macOS Keychain, Linux Secret Service), запись **`weeek-mcp` / `api-token`** — та же, что создаёт
-   визард `npx @dsudomoin/weeek-mcp init`. Значение никогда не логируется.
-3. Если и там пусто — сервер поднимается, но вызовы возвращают `isError` с подсказкой.
+2. На Windows — запись **`weeek-mcp` / `api-token`** в Windows Credential Manager (та же, что создаёт визард
+   `npx @dsudomoin/weeek-mcp init`). Значение никогда не логируется.
+3. Если пусто — сервер поднимается, но вызовы возвращают `isError` с подсказкой.
+
+На Linux пилота токен задаётся переменной `WEEEK_API_TOKEN` (Secret Service можно добавить позже — `src/token.rs`).
 
 ## Подключение (OpenCode)
 
 ```jsonc
-"weeek-full": {
+"weeek": {
   "type": "local",
-  "command": ["node", "C:\\project\\ai\\weeeking\\dist\\server.mjs"],
+  "command": ["C:\\project\\ai\\weeeking\\target\\release\\weeeking.exe"],
   "enabled": true,
-  "environment": {
-    "WEEEK_API_TOKEN": "{env:WEEEK_API_TOKEN}",
-    "READ_ONLY": "true"
-  }
+  "environment": { "READ_ONLY": "false" }
 }
 ```
 
-Любой другой MCP-клиент: команда `node <путь>\\dist\\server.mjs`, stdio.
-
-## Примеры
-
-- `weeek_context` — участники/теги/проекты; отсюда берутся ID.
-- `weeek_project`, action=`create-project`, params=`{ "name": "ИИ-Разработка", "isPrivate": 0 }`
-- `weeek_search_tasks`, `{ "search": "хранилище", "completed": false }`
-- `weeek_get_task`, `{ "taskId": 529 }`
-- `weeek_complete_task`, `{ "taskId": 478, "completed": true }`
+Любой другой MCP-клиент: команда — путь к бинарнику, транспорт — stdio.
 
 ## Обновление спецификации
 
 ```bash
-npm run update:openapi   # перегенерирует src/generated/operations.ts
-npm run build
+node tools/update-spec.mjs   # тянет свежую OpenAPI с developers.weeek.net → spec/operations.json
+cargo build --release        # пересобрать бинарник со свежей спекой
 ```
 
 ## Разработка
 
 ```bash
-npm test        # сборка + smoke-тест (stdio, без токена)
+cargo fmt
+cargo clippy --all-targets
+cargo test                   # smoke: read-only и полный режимы (без токена)
 ```
 
-`src/generated/` — машино-генерируемый код, руками не правится. Curated-тулы живут в
-`src/tools/curated.ts`, генератор — в `scripts/update-openapi.mjs`.
+`legacy/` — прежняя TypeScript-реализация (референс, в OpenCode не подключена).
+
+> Примечание: OpenCode V2 не запускает LSP-серверы, поэтому rust-analyzer используется в редакторе/CLI,
+> а диагностика для агента — через `cargo check`, `cargo clippy` и `cargo test`.
 
 ## Ограничения API Weeek (важно агенту)
 
