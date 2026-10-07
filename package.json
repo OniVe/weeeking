@@ -1,0 +1,40 @@
+{
+  "name": "weeeking",
+  "version": "0.1.0",
+  "description": "Weeeking — MCP server for Weeek with full public API coverage (generated from the official OpenAPI). Weeek and conquer.",
+  "type": "module",
+  "bin": {
+    "weeeking": "dist/server.mjs"
+  },
+  "scripts": {
+    "update:openapi": "node scripts/update-openapi.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && node scripts/build.mjs",
+    "start": "node dist/server.mjs",
+    "test": "npm run build && node --test tests/smoke.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "weeek",
+    "weeeking",
+    "tasks",
+    "crm"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "3.25"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "^2.1.0"
+  }
+}
