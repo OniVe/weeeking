@@ -4,3 +4,9 @@ legacy/dist/
 spec/.spec-chunk.mjs
 desktop.ini
 *.log
+
+# локальные настройки OpenCode — машинные пути, в репозиторий не идут
+.opencode/opencode.jsonc
+.opencode/opencode.json
+/opencode.jsonc
+/opencode.json
