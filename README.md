@@ -53,7 +53,7 @@ node dist/server.mjs # stdio MCP-сервер
 ```jsonc
 "weeek-full": {
   "type": "local",
-  "command": ["node", "C:\\repository\\weeeking\\dist\\server.mjs"],
+  "command": ["node", "C:\\project\\ai\\weeeking\\dist\\server.mjs"],
   "enabled": true,
   "environment": {
     "WEEEK_API_TOKEN": "{env:WEEEK_API_TOKEN}",
