@@ -13,7 +13,12 @@ $old = "$exe.old"
 if (Test-Path $exe) {
     if (Test-Path $old) {
         Remove-Item $old -ErrorAction SilentlyContinue
-        if (Test-Path $old) { throw "Не могу убрать $old — его держит старый процесс. Закройте лишние сессии OpenCode." }
+        if (Test-Path $old) {
+            # старый .old всё ещё залочен запущенным процессом — уводим его под уникальным именем
+            $stamp = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            Move-Item $old "$old.$stamp" -ErrorAction SilentlyContinue
+            if (Test-Path $old) { throw "Не могу освободить $old — перезапустите OpenCode и повторите." }
+        }
     }
     Move-Item $exe $old
     Write-Host "→ старый бинарник отложен: $old"

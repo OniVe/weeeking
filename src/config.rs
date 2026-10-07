@@ -7,6 +7,16 @@ pub struct Config {
     pub read_only: bool,
     pub max_chars: usize,
     pub disable_keychain: bool,
+    /// Имя записи в системном хранилище (мультиаккаунт), по умолчанию `api-token`.
+    pub keychain_account: String,
+}
+
+/// Нормализует имя аккаунта из значения переменной окружения.
+pub fn keychain_account_from(value: Option<String>) -> String {
+    value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "api-token".to_string())
 }
 
 impl Config {
@@ -41,6 +51,7 @@ impl Config {
                 .as_str(),
             "1" | "true" | "yes"
         );
+        let keychain_account = keychain_account_from(env::var("WEEEK_KEYCHAIN_ACCOUNT").ok());
 
         Self {
             base_url,
@@ -48,6 +59,27 @@ impl Config {
             read_only,
             max_chars,
             disable_keychain,
+            keychain_account,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::keychain_account_from;
+
+    #[test]
+    fn account_defaults_to_api_token() {
+        assert_eq!(keychain_account_from(None), "api-token");
+        assert_eq!(keychain_account_from(Some("".into())), "api-token");
+        assert_eq!(keychain_account_from(Some("   ".into())), "api-token");
+    }
+
+    #[test]
+    fn account_is_trimmed_and_kept() {
+        assert_eq!(
+            keychain_account_from(Some("  api-token-anna ".into())),
+            "api-token-anna"
+        );
     }
 }

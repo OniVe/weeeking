@@ -195,3 +195,34 @@ fn writable_surface_exposes_mutations() {
         "writable project tool must offer create-project: {actions:?}"
     );
 }
+
+#[test]
+fn cli_help_mentions_store_token() {
+    let output = Command::new(env!("CARGO_BIN_EXE_weeeking"))
+        .arg("--help")
+        .output()
+        .expect("run --help");
+    assert!(output.status.success(), "--help must exit 0");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains("store-token"),
+        "--help must mention store-token: {text}"
+    );
+    assert!(
+        text.contains("WEEEK_KEYCHAIN_ACCOUNT"),
+        "--help must mention the account env var"
+    );
+}
+
+#[test]
+fn cli_unknown_command_exits_2() {
+    let output = Command::new(env!("CARGO_BIN_EXE_weeeking"))
+        .arg("definitely-not-a-command")
+        .output()
+        .expect("run unknown command");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "unknown command must exit with code 2"
+    );
+}
