@@ -73,6 +73,12 @@ cargo clippy --all-targets
 cargo test                   # smoke: read-only и полный режимы (без токена)
 ```
 
+Пересборка при работающем OpenCode (exe залочен запущенным MCP-сервером):
+
+```powershell
+.\tools\rebuild.ps1   # rename-swap: отложить старый exe → собрать новый → прибрать старый
+```
+
 `legacy/` — прежняя TypeScript-реализация (референс, в OpenCode не подключена).
 
 > Примечание: OpenCode V2 не запускает LSP-серверы, поэтому rust-analyzer используется в редакторе/CLI,
