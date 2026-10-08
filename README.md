@@ -43,7 +43,7 @@ cargo build --release
 
 1. `WEEEK_API_TOKEN` (или `WEEEK_TOKEN`) из окружения — приоритет всегда за ним.
 2. На Windows — запись **`weeek-mcp` / `WEEEK_KEYCHAIN_ACCOUNT`** (по умолчанию `api-token`) в Windows Credential
-   Manager — та же, что создаёт визард `npx @dsudomoin/weeek-mcp init`. Значение никогда не логируется.
+   Manager (сохраняется командой `weeeking store-token`). Значение никогда не логируется.
 3. Если пусто — сервер поднимается, но вызовы возвращают `isError` с подсказкой.
 
 На Linux пилота токен задаётся переменной `WEEEK_API_TOKEN` (Secret Service можно добавить позже — `src/token.rs`).

@@ -20,8 +20,8 @@ impl TokenSource {
 /// Token resolution order:
 /// 1. WEEEK_API_TOKEN / WEEEK_TOKEN from the environment.
 /// 2. The OS keychain entry `weeek-mcp` / `WEEEK_KEYCHAIN_ACCOUNT` (default
-///    `api-token`) — the same entry the wizard writes, so the stored token
-///    keeps working; other accounts live in sibling entries (мультиаккаунт).
+///    `api-token`), filled in by `weeeking store-token`; other accounts live
+///    in sibling entries (мультиаккаунт).
 pub fn resolve(cfg: &Config) -> (Option<String>, TokenSource) {
     for key in ["WEEEK_API_TOKEN", "WEEEK_TOKEN"] {
         if let Ok(value) = std::env::var(key) {
