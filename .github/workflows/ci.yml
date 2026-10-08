@@ -58,12 +58,15 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
-      - name: Check tag matches Cargo.toml version
+      - name: Check release preconditions
         shell: bash
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
             echo "tag ${GITHUB_REF_NAME} does not match v${version}"; exit 1
+          fi
+          if [ ! -s .github/release-body.md ]; then
+            echo ".github/release-body.md is missing or empty"; exit 1
           fi
       - run: cargo build --release --locked
       - name: Package (Windows)
@@ -81,7 +84,7 @@ jobs:
       # softprops/action-gh-release@v2 (запиннено по SHA)
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
-          generate_release_notes: true
+          body_path: .github/release-body.md
           files: |
             ${{ matrix.archive }}
             ${{ matrix.archive }}.sha256
