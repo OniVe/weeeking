@@ -6,3 +6,6 @@ desktop.ini
 /.opencode/*
 !/.opencode/skills/
 /opencode.*
+
+# локальные инструкции для агентов — в репозиторий не идут
+/AGENTS.md
