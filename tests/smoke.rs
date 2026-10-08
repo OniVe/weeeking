@@ -1,114 +1,15 @@
-//! Integration smoke test: boots the built binary over stdio (no token needed)
-//! and checks the tool surface in both modes. Run: cargo test
+//! Интеграционный smoke: поверхность инструментов в обоих режимах (без токена).
+//! Run: cargo test
 
-use serde_json::{Value, json};
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+mod common;
 
-struct Client {
-    child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
-}
-
-impl Client {
-    fn start(overrides: &[(&str, &str)]) -> Self {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_weeeking"));
-        command
-            .env("WEEEK_API_TOKEN", "")
-            .env("WEEEK_TOKEN", "")
-            .env("WEEEK_DISABLE_KEYCHAIN", "1")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        for (key, value) in overrides {
-            command.env(key, value);
-        }
-        let mut child = command.spawn().expect("failed to spawn weeeking");
-        let stdin = child.stdin.take().expect("stdin");
-        let stdout = BufReader::new(child.stdout.take().expect("stdout"));
-        let mut client = Self {
-            child,
-            stdin,
-            stdout,
-        };
-        client.initialize();
-        client
-    }
-
-    fn send(&mut self, message: Value) {
-        writeln!(self.stdin, "{message}").expect("write");
-        self.stdin.flush().expect("flush");
-    }
-
-    fn wait_for(&mut self, id: i64) -> Value {
-        loop {
-            let mut line = String::new();
-            let read = self.stdout.read_line(&mut line).expect("read");
-            assert!(read > 0, "server closed stdout before response id={id}");
-            if let Ok(value) = serde_json::from_str::<Value>(line.trim())
-                && value.get("id").and_then(Value::as_i64) == Some(id)
-            {
-                return value;
-            }
-        }
-    }
-
-    fn initialize(&mut self) {
-        self.send(json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-06-18",
-                "capabilities": {},
-                "clientInfo": { "name": "weeeking-smoke", "version": "1.0.0" }
-            }
-        }));
-        let response = self.wait_for(1);
-        assert!(
-            response.get("result").is_some(),
-            "initialize failed: {response}"
-        );
-        self.send(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
-    }
-
-    fn list_tools(&mut self) -> Vec<Value> {
-        self.send(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {} }));
-        let response = self.wait_for(2);
-        response["result"]["tools"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    fn call_tool(&mut self, id: i64, name: &str, arguments: Value) -> Value {
-        self.send(json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "method": "tools/call",
-            "params": { "name": name, "arguments": arguments }
-        }));
-        self.wait_for(id)
-    }
-}
-
-impl Drop for Client {
-    fn drop(&mut self) {
-        let _ = self.child.kill();
-    }
-}
-
-fn tool_names(tools: &[Value]) -> Vec<String> {
-    tools
-        .iter()
-        .filter_map(|tool| tool["name"].as_str().map(str::to_string))
-        .collect()
-}
+use common::{McpClient, result_text, tool_names};
+use serde_json::json;
+use std::process::Command;
 
 #[test]
 fn read_only_surface_is_safe() {
-    let mut client = Client::start(&[]);
+    let mut client = McpClient::start(&[]);
     let tools = client.list_tools();
     let names = tool_names(&tools);
 
@@ -145,14 +46,12 @@ fn read_only_surface_is_safe() {
         "read-only: write-only task group must be hidden"
     );
 
-    let call = client.call_tool(3, "weeek_context", json!({}));
+    let call = client.call_tool("weeek_context", json!({}));
     assert_eq!(
-        call["result"]["isError"], true,
+        call["isError"], true,
         "no-token call must return isError: {call}"
     );
-    let text = call["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap_or_default();
+    let text = result_text(&call);
     assert!(
         text.contains("WEEEK_API_TOKEN"),
         "no-token error must mention WEEEK_API_TOKEN: {text}"
@@ -161,7 +60,7 @@ fn read_only_surface_is_safe() {
 
 #[test]
 fn writable_surface_exposes_mutations() {
-    let mut client = Client::start(&[("READ_ONLY", "false")]);
+    let mut client = McpClient::start(&[("READ_ONLY", "false")]);
     let tools = client.list_tools();
     let names = tool_names(&tools);
 
@@ -229,29 +128,25 @@ fn cli_unknown_command_exits_2() {
 
 #[test]
 fn required_params_are_validated_client_side() {
-    let mut client = Client::start(&[("READ_ONLY", "false")]);
+    let mut client = McpClient::start(&[("READ_ONLY", "false")]);
 
-    let boards = client.call_tool(3, "weeek_board", json!({ "action": "get-boards" }));
-    let text = boards["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap_or_default();
+    let boards = client.call_tool("weeek_board", json!({ "action": "get-boards" }));
     assert_eq!(
-        boards["result"]["isError"], true,
+        boards["isError"], true,
         "get-boards without projectId must fail"
     );
+    let text = result_text(&boards);
     assert!(
         text.contains("обязательный query-параметр"),
         "get-boards without projectId must be caught client-side: {text}"
     );
 
-    let project = client.call_tool(4, "weeek_project", json!({ "action": "create-project" }));
-    let text = project["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap_or_default();
+    let project = client.call_tool("weeek_project", json!({ "action": "create-project" }));
     assert_eq!(
-        project["result"]["isError"], true,
+        project["isError"], true,
         "create-project without name must fail"
     );
+    let text = result_text(&project);
     assert!(
         text.contains("(body)"),
         "create-project without name must be caught client-side: {text}"
@@ -260,19 +155,13 @@ fn required_params_are_validated_client_side() {
 
 #[test]
 fn dot_segment_path_params_are_rejected() {
-    let mut client = Client::start(&[]);
+    let mut client = McpClient::start(&[]);
     let call = client.call_tool(
-        3,
         "weeek_project",
         json!({ "action": "get-project", "params": { "id": ".." } }),
     );
-    let text = call["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap_or_default();
-    assert_eq!(
-        call["result"]["isError"], true,
-        "dot-segment id must be rejected"
-    );
+    assert_eq!(call["isError"], true, "dot-segment id must be rejected");
+    let text = result_text(&call);
     assert!(
         text.contains("сегменты"),
         "dot-segment rejection must explain the reason: {text}"
@@ -281,15 +170,12 @@ fn dot_segment_path_params_are_rejected() {
 
 #[test]
 fn explicit_null_optional_query_is_ignored() {
-    let mut client = Client::start(&[]);
+    let mut client = McpClient::start(&[]);
     let call = client.call_tool(
-        3,
         "weeek_contacts",
         json!({ "action": "get-contacts", "params": { "search": null } }),
     );
-    let text = call["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap_or_default();
+    let text = result_text(&call);
     assert!(
         !text.contains("не принимает параметры"),
         "explicit null must not become an unexpected-params error: {text}"
@@ -302,16 +188,13 @@ fn explicit_null_optional_query_is_ignored() {
 
 #[test]
 fn wrong_param_types_are_rejected() {
-    let mut client = Client::start(&[]);
+    let mut client = McpClient::start(&[]);
     let call = client.call_tool(
-        3,
         "weeek_board",
         json!({ "action": "get-boards", "params": { "projectId": "abc" } }),
     );
-    let text = call["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap_or_default();
-    assert_eq!(call["result"]["isError"], true);
+    assert_eq!(call["isError"], true);
+    let text = result_text(&call);
     assert!(
         text.contains("ожидает тип"),
         "wrong type must be rejected client-side: {text}"
@@ -320,42 +203,33 @@ fn wrong_param_types_are_rejected() {
 
 #[test]
 fn path_params_are_validated_for_empty_and_type() {
-    let mut client = Client::start(&[]);
+    let mut client = McpClient::start(&[]);
 
     let empty = client.call_tool(
-        3,
         "weeek_project",
         json!({ "action": "get-project", "params": { "id": "" } }),
     );
-    let text = empty["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap_or_default();
+    let text = result_text(&empty);
     assert!(
         text.contains("пустая строка"),
         "empty path param must be rejected: {text}"
     );
 
     let wrong = client.call_tool(
-        4,
         "weeek_tags",
         json!({ "action": "get-tag", "params": { "id": "abc" } }),
     );
-    let text = wrong["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap_or_default();
+    let text = result_text(&wrong);
     assert!(
         text.contains("ожидает тип"),
         "wrong-type path param must be rejected: {text}"
     );
 
     let valid = client.call_tool(
-        5,
         "weeek_tags",
         json!({ "action": "get-tag", "params": { "id": 1 } }),
     );
-    let text = valid["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap_or_default();
+    let text = result_text(&valid);
     assert!(
         text.contains("WEEEK_API_TOKEN"),
         "valid path param must pass validation and reach the token check: {text}"
@@ -363,13 +237,10 @@ fn path_params_are_validated_for_empty_and_type() {
 
     // string-типизированный id: числовое значение коэрсится в строку (LLM-эргономика)
     let coerced = client.call_tool(
-        6,
         "weeek_project",
         json!({ "action": "get-project", "params": { "id": 42 } }),
     );
-    let text = coerced["result"]["content"][0]["text"]
-        .as_str()
-        .unwrap_or_default();
+    let text = result_text(&coerced);
     assert!(
         text.contains("WEEEK_API_TOKEN"),
         "numeric id for a string path param must be coerced and reach the token check: {text}"

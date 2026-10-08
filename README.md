@@ -26,6 +26,17 @@ cargo build --release
 # → target/release/weeeking.exe (Windows) / target/release/weeeking (Linux)
 ```
 
+## Релизы
+
+Готовые бинарники — в [GitHub Releases](https://github.com/OniVe/weeeking/releases):
+`weeeking-x86_64-pc-windows-msvc.zip` и `weeeking-x86_64-unknown-linux-gnu.tar.gz`, рядом контрольные суммы `.sha256`.
+
+```bash
+# проверка контрольной суммы
+certutil -hashfile weeeking-x86_64-pc-windows-msvc.zip SHA256   # Windows
+sha256sum -c weeeking-x86_64-unknown-linux-gnu.tar.gz.sha256     # Linux
+```
+
 ## Переменные окружения
 
 | Переменная | По умолчанию | Описание |
@@ -116,7 +127,14 @@ cargo fmt && cargo build --release
 ```bash
 cargo fmt
 cargo clippy --all-targets
-cargo test                   # smoke: read-only и полный режимы (без токена)
+cargo test                   # unit + mock-сюита (HTTP против эмулятора) + smoke
+```
+
+Приёмочный smoke против живого API (перед релизом; read-only по умолчанию):
+
+```bash
+python tools/live_smoke.py
+python tools/live_smoke.py --write-test <PROJECT_ID>   # + цикл мутаций в sandbox-проекте
 ```
 
 Пересборка при работающем OpenCode (exe залочен запущенным MCP-сервером):

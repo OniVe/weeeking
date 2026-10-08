@@ -107,6 +107,10 @@ pub fn push_query(q: &mut Vec<(String, String)>, key: &str, value: &Value) {
 fn push_scalar(q: &mut Vec<(String, String)>, key: &str, value: &Value) {
     let s = match value {
         Value::String(s) => s.clone(),
+        // Weeek принимает булевы query-параметры только как 1/0 (`true/false` -> HTTP 422),
+        // как и в квирке с isPrivate в теле запроса.
+        Value::Bool(true) => "1".to_string(),
+        Value::Bool(false) => "0".to_string(),
         other => other.to_string(),
     };
     q.push((key.to_string(), s));
@@ -169,5 +173,22 @@ mod tests {
         assert_eq!(encode_path_segment("normal-id").unwrap(), "normal-id");
         assert_eq!(encode_path_segment("a b").unwrap(), "a%20b");
         assert_eq!(encode_path_segment("50%").unwrap(), "50%25");
+    }
+
+    #[test]
+    fn boolean_query_is_serialized_as_bit() {
+        // Weeek API требует 1/0 вместо true/false в query (иначе HTTP 422).
+        let mut query = Vec::new();
+        push_query(&mut query, "completed", &json!(true));
+        push_query(&mut query, "all", &json!(false));
+        push_query(&mut query, "perPage", &json!(5));
+        assert_eq!(
+            query,
+            vec![
+                ("completed".to_string(), "1".to_string()),
+                ("all".to_string(), "0".to_string()),
+                ("perPage".to_string(), "5".to_string()),
+            ]
+        );
     }
 }
