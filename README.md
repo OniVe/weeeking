@@ -125,10 +125,6 @@ pwsh -ExecutionPolicy Bypass -File tools\rebuild.ps1
 # или из сессии pwsh: powershell -ExecutionPolicy Bypass -File tools\rebuild.ps1
 ```
 
-> Примечание: OpenCode V2 не запускает LSP-серверы нативно. Для семантики в агенте подключён MCP-сервер
-> `rust-analyzer-mcp` (см. `.opencode/opencode.jsonc`) — hover, references, rename, diagnostics по воркспейсу;
-> сам rust-analyzer доступен и в редакторе/CLI, базовая проверка — `cargo check` / `cargo clippy` / `cargo test`.
-
 ## Ограничения API Weeek (важно агенту)
 
 - Описание задачи задаётся **только при создании** — позже не изменить.
