@@ -5,6 +5,7 @@ edition = "2024"
 description = "Weeeking — MCP server for Weeek with full public API coverage (generated from the official OpenAPI). Weeek and conquer."
 license = "MIT"
 rust-version = "1.88"
+repository = "https://github.com/OniVe/weeeking"
 keywords = ["mcp", "model-context-protocol", "weeek", "weeeking", "tasks"]
 categories = ["command-line-utilities"]
 readme = "README.md"
