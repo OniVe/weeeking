@@ -405,16 +405,9 @@ impl WeeekingServer {
 
     async fn tool_download_attachment(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let file_id = req_str(args, "fileId")?;
-        let op = self
-            .spec
-            .operations
-            .get("get-attachment")
+        let op = crate::spec::find_operation("get-attachment")
             .ok_or_else(|| "в спецификации нет get-attachment".to_string())?;
-        let param_name = op
-            .path_params
-            .first()
-            .map(|p| p.name.clone())
-            .unwrap_or_else(|| "file_id".to_string());
+        let param_name = op.path_params.first().map(|p| p.name).unwrap_or("file_id");
         let encoded = encode_path_segment(&file_id)?;
         let path = op.path.replace(&format!("{{{param_name}}}"), &encoded);
         self.client.download(&path).await.map_err(|e| e.to_string())

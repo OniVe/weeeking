@@ -156,23 +156,6 @@ pub fn unwrap_key(value: Value, key: &str) -> Value {
     }
 }
 
-/// Renders a parameter's enum values for tool descriptions.
-pub fn fmt_enum(kind: &Option<Vec<Value>>) -> Option<String> {
-    let values = kind.as_ref()?;
-    let rendered: Vec<String> = values
-        .iter()
-        .map(|v| match v {
-            Value::String(s) => s.clone(),
-            other => other.to_string(),
-        })
-        .collect();
-    if rendered.is_empty() {
-        None
-    } else {
-        Some(rendered.join("|"))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

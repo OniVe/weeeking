@@ -13,8 +13,9 @@
   `weeek_list_comments`, `weeek_download_attachment` + записи (`weeek_create_task`, `weeek_update_task`,
   `weeek_move_task`, `weeek_complete_task`, `weeek_set_task_people`, `weeek_add_comment`, `weeek_delete_comment`).
 - **READ_ONLY по умолчанию**: изменяющие действия не регистрируются, пока не выставлено `READ_ONLY=false`.
-- **Спека вшита в бинарник**: `spec/operations.json` генерируется из первоисточника (developers.weeek.net)
-  скриптом `tools/update-spec.mjs` и попадает в сборку через `include_str!`.
+- **Кодогенератор спеки**: `tools/update-spec.mjs` тянет OpenAPI с developers.weeek.net и генерирует
+  `src/spec_generated.rs` — статические данные (`&'static str`), которые компилируются в бинарник;
+  в рантайме нет ни JSON, ни парсинга, чанк спеки нигде не сохраняется.
 
 ## Сборка
 
@@ -105,8 +106,8 @@ weeeking --help                         справка
 ## Обновление спецификации
 
 ```bash
-node tools/update-spec.mjs   # тянет свежую OpenAPI с developers.weeek.net → spec/operations.json
-cargo build --release        # пересобрать бинарник со свежей спекой
+node tools/update-spec.mjs    # developers.weeek.net → src/spec_generated.rs (кодогенерация)
+cargo fmt && cargo build --release
 ```
 
 ## Разработка

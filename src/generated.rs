@@ -1,6 +1,6 @@
 use crate::http::WeeekClient;
 use crate::server::WeeekingServer;
-use crate::spec::{OpDef, ParamDef, Spec};
+use crate::spec::{GROUPS, OpDef, ParamDef, find_operation};
 use crate::util::*;
 use rmcp::model::Tool;
 use serde_json::{Map, Value, json};
@@ -8,15 +8,15 @@ use std::collections::{HashMap, HashSet};
 
 /// Builds one tool per API tag with an `action` parameter and returns the
 /// dispatch map (tool name -> allowed operation ids).
-pub fn build(spec: &'static Spec, read_only: bool) -> (Vec<Tool>, HashMap<String, Vec<String>>) {
+pub fn build(read_only: bool) -> (Vec<Tool>, HashMap<String, Vec<String>>) {
     let mut tools = Vec::new();
     let mut dispatch = HashMap::new();
 
-    for group in &spec.groups {
+    for group in GROUPS {
         let all: Vec<&OpDef> = group
             .op_ids
             .iter()
-            .filter_map(|id| spec.operations.get(id))
+            .filter_map(|id| find_operation(id))
             .collect();
         let ops: Vec<&OpDef> = all
             .iter()
@@ -42,7 +42,7 @@ pub fn build(spec: &'static Spec, read_only: bool) -> (Vec<Tool>, HashMap<String
             ));
         }
 
-        let action_ids: Vec<&str> = ops.iter().map(|op| op.id.as_str()).collect();
+        let action_ids: Vec<&str> = ops.iter().map(|op| op.id).collect();
         let input_schema = schema(
             json!({
                 "action": {
@@ -71,7 +71,7 @@ pub fn build(spec: &'static Spec, read_only: bool) -> (Vec<Tool>, HashMap<String
 
         dispatch.insert(
             tool.name.to_string(),
-            ops.iter().map(|op| op.id.clone()).collect(),
+            ops.iter().map(|op| op.id.to_string()).collect(),
         );
         tools.push(tool);
     }
@@ -81,7 +81,7 @@ pub fn build(spec: &'static Spec, read_only: bool) -> (Vec<Tool>, HashMap<String
 
 fn describe_op(op: &OpDef) -> String {
     let mut parts: Vec<String> = Vec::new();
-    for p in &op.path_params {
+    for p in op.path_params {
         parts.push(format!(
             "{} (path, {}{})",
             p.name,
@@ -89,9 +89,10 @@ fn describe_op(op: &OpDef) -> String {
             if p.required { ", обяз." } else { "" }
         ));
     }
-    for q in &op.query_params {
-        let enum_hint = fmt_enum(&q.kind)
-            .map(|values| format!(": {values}"))
+    for q in op.query_params {
+        let enum_hint = q
+            .enum_hint
+            .map(|hint| format!(": {hint}"))
             .unwrap_or_default();
         parts.push(format!(
             "{} ({}{}{})",
@@ -101,9 +102,10 @@ fn describe_op(op: &OpDef) -> String {
             if q.required { ", обяз." } else { "" }
         ));
     }
-    for b in &op.body_fields {
-        let enum_hint = fmt_enum(&b.kind)
-            .map(|values| format!(": {values}"))
+    for b in op.body_fields {
+        let enum_hint = b
+            .enum_hint
+            .map(|hint| format!(": {hint}"))
             .unwrap_or_default();
         parts.push(format!(
             "{}{} (body, {}{})",
@@ -137,11 +139,8 @@ impl WeeekingServer {
                 "Операция «{action}» недоступна (проверьте список action в описании инструмента и режим READ_ONLY)."
             ));
         }
-        let op = self
-            .spec
-            .operations
-            .get(&action)
-            .ok_or_else(|| format!("Неизвестная операция: {action}"))?;
+        let op =
+            find_operation(&action).ok_or_else(|| format!("Неизвестная операция: {action}"))?;
         let params = args
             .get("params")
             .and_then(Value::as_object)
@@ -156,13 +155,13 @@ async fn run_op(
     op: &OpDef,
     params: &Map<String, Value>,
 ) -> Result<Value, String> {
-    let mut path = op.path.clone();
+    let mut path = op.path.to_string();
     let mut used: HashSet<String> = HashSet::new();
 
-    for param in &op.path_params {
-        match params.get(&param.name) {
+    for param in op.path_params {
+        match params.get(param.name) {
             Some(value) if !value.is_null() => {
-                used.insert(param.name.clone());
+                used.insert(param.name.to_string());
                 validate_path_param(param, value)
                     .map_err(|e| format!("{e} (операция {})", op.id))?;
                 let encoded = encode_path_segment(&scalar_string(value))
@@ -181,8 +180,8 @@ async fn run_op(
     }
 
     let mut query: Vec<(String, String)> = Vec::new();
-    for param in &op.query_params {
-        match params.get(&param.name) {
+    for param in op.query_params {
+        match params.get(param.name) {
             None | Some(Value::Null) => {
                 if param.required {
                     return Err(format!(
@@ -190,25 +189,25 @@ async fn run_op(
                         param.name, op.id
                     ));
                 }
-                if params.contains_key(&param.name) {
+                if params.contains_key(param.name) {
                     // Явный null для необязательного параметра: потребляем и игнорируем,
                     // чтобы он не всплыл как «лишний параметр» (или не утёк в body).
-                    used.insert(param.name.clone());
+                    used.insert(param.name.to_string());
                 }
             }
             Some(value) => {
                 validate_param_type(param, value)
                     .map_err(|e| format!("{e} (операция {})", op.id))?;
-                push_query(&mut query, &param.name, value);
-                used.insert(param.name.clone());
+                push_query(&mut query, param.name, value);
+                used.insert(param.name.to_string());
             }
         }
     }
 
     let extras: Vec<&String> = params.keys().filter(|key| !used.contains(*key)).collect();
     let body = if op.has_body {
-        for field in &op.body_fields {
-            match params.get(&field.name) {
+        for field in op.body_fields {
+            match params.get(field.name) {
                 None | Some(Value::Null) => {
                     if field.required {
                         return Err(format!(
@@ -247,7 +246,7 @@ async fn run_op(
     };
 
     client
-        .call(&op.method, &path, &query, body.as_ref())
+        .call(op.method, &path, &query, body.as_ref())
         .await
         .map_err(|e| e.to_string())
 }
@@ -262,7 +261,7 @@ fn scalar_string(value: &Value) -> String {
 /// Проверяет скалярные типы, заявленные в спеке (integer/boolean/string).
 /// Составные и союзные типы («array», «integer|null», …) пропускаются как есть.
 fn validate_param_type(param: &ParamDef, value: &Value) -> Result<(), String> {
-    let ok = match param.ty.as_str() {
+    let ok = match param.ty {
         "integer" => value.is_i64() || value.is_u64(),
         "boolean" => value.is_boolean(),
         "string" => value.is_string(),

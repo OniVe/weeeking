@@ -4,6 +4,7 @@ mod generated;
 mod http;
 mod server;
 mod spec;
+mod spec_generated;
 mod token;
 mod util;
 
@@ -67,13 +68,12 @@ async fn main() -> anyhow::Result<()> {
     let client = http::WeeekClient::new(&cfg, token_value);
     let server = server::WeeekingServer::new(client, cfg.read_only, cfg.max_chars);
 
-    let spec = spec::Spec::load();
     eprintln!(
         "[weeeking] готов. Спека: {} от {} ({} операций) — {}. READ_ONLY={}, токен: {}, API {}",
-        spec.spec_title,
-        spec.generated_at,
-        spec.operations.len(),
-        spec.spec_url,
+        spec::SPEC_TITLE,
+        spec::SPEC_GENERATED_AT,
+        spec::OPERATIONS.len(),
+        spec::SPEC_URL,
         cfg.read_only,
         source.describe(),
         cfg.base_url

@@ -1,7 +1,6 @@
 /target
 legacy/node_modules/
 legacy/dist/
-spec/.spec-chunk.mjs
 desktop.ini
 *.log
 

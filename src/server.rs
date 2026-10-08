@@ -1,7 +1,6 @@
 use crate::curated;
 use crate::generated;
 use crate::http::WeeekClient;
-use crate::spec::Spec;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, Implementation, ListToolsResult,
     PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
@@ -15,7 +14,6 @@ use std::time::Instant;
 
 pub struct WeeekingServer {
     pub(crate) client: WeeekClient,
-    pub(crate) spec: &'static Spec,
     pub(crate) read_only: bool,
     pub(crate) max_chars: usize,
     tools: Vec<Tool>,
@@ -25,14 +23,12 @@ pub struct WeeekingServer {
 
 impl WeeekingServer {
     pub fn new(client: WeeekClient, read_only: bool, max_chars: usize) -> Self {
-        let spec = Spec::load();
-        let (gen_tools, group_ops) = generated::build(spec, read_only);
+        let (gen_tools, group_ops) = generated::build(read_only);
         let mut tools = gen_tools;
         tools.extend(curated::tools(read_only));
 
         Self {
             client,
-            spec,
             read_only,
             max_chars,
             tools,
