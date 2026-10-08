@@ -65,6 +65,15 @@ fn read_keychain(_account: &str) -> Option<String> {
 #[cfg(windows)]
 pub fn store_token(account: &str) -> anyhow::Result<()> {
     use anyhow::{Context, bail};
+    use std::io::IsTerminal as _;
+
+    // rpassword читает консольный ввод; без терминала процесс завис бы молча.
+    if !std::io::stdin().is_terminal() {
+        bail!(
+            "store-token требует интерактивного терминала (скрытый ввод читается с консоли). \
+             Запустите команду в обычном окне терминала."
+        );
+    }
 
     let token = rpassword::prompt_password(format!(
         "Введите токен Weeek для записи «{account}» (ввод скрыт): "

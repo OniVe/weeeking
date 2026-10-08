@@ -47,8 +47,9 @@ pub fn arg_str(args: &JsonObject, key: &str) -> Option<String> {
 }
 
 pub fn arg_i64(args: &JsonObject, key: &str) -> Option<i64> {
+    // Строго целые: float молча усекать нельзя (запрос ушёл бы не туда).
     match args.get(key) {
-        Some(Value::Number(n)) => n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)),
+        Some(Value::Number(n)) => n.as_i64(),
         _ => None,
     }
 }
@@ -75,8 +76,13 @@ pub fn arg_str_array(args: &JsonObject, key: &str) -> Option<Vec<String>> {
 }
 
 pub fn req_i64(args: &JsonObject, key: &str) -> Result<i64, String> {
-    arg_i64(args, key)
-        .ok_or_else(|| format!("Не задан обязательный параметр «{key}» (целое число)."))
+    match args.get(key) {
+        None | Some(Value::Null) => Err(format!("Не задан обязательный параметр «{key}».")),
+        Some(value) => value
+            .as_i64()
+            .filter(|n| *n > 0)
+            .ok_or_else(|| format!("Параметр «{key}» должен быть положительным целым числом.")),
+    }
 }
 
 pub fn req_str(args: &JsonObject, key: &str) -> Result<String, String> {
@@ -120,6 +126,18 @@ pub fn encode_segment(s: &str) -> String {
     out
 }
 
+/// Как `encode_segment`, но дополнительно запрещает RFC dot-segments (`.` и `..`):
+/// url-нормализация схлопнула бы `/tm/projects/..` в `/tm/` и увела бы write-метод
+/// на родительский коллекционный endpoint.
+pub fn encode_path_segment(value: &str) -> Result<String, String> {
+    if value == "." || value == ".." {
+        return Err(format!(
+            "недопустимый path-параметр «{value}»: сегменты '.' и '..' запрещены."
+        ));
+    }
+    Ok(encode_segment(value))
+}
+
 /// Unwraps the live API envelope ({ success, user }, { success, projects }, …)
 /// when the key is present; otherwise returns the value unchanged.
 pub fn unwrap_key(value: Value, key: &str) -> Value {
@@ -149,5 +167,19 @@ pub fn fmt_enum(kind: &Option<Vec<Value>>) -> Option<String> {
         None
     } else {
         Some(rendered.join("|"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dot_segments_are_rejected() {
+        assert!(encode_path_segment(".").is_err());
+        assert!(encode_path_segment("..").is_err());
+        assert_eq!(encode_path_segment("normal-id").unwrap(), "normal-id");
+        assert_eq!(encode_path_segment("a b").unwrap(), "a%20b");
+        assert_eq!(encode_path_segment("50%").unwrap(), "50%25");
     }
 }

@@ -1,6 +1,17 @@
 use crate::config::Config;
+use futures_util::StreamExt;
 use serde_json::{Value, json};
 use std::time::Duration;
+
+/// Тело ошибки в сообщении ограничиваем, чтобы огромный ответ API не раздувал ответ тула.
+const ERROR_BODY_MAX_CHARS: usize = 2000;
+
+fn cap_error_body(mut body: String) -> String {
+    if body.chars().count() > ERROR_BODY_MAX_CHARS {
+        body = body.chars().take(ERROR_BODY_MAX_CHARS).collect::<String>() + "…[обрезано]";
+    }
+    body
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum WeeekError {
@@ -25,6 +36,7 @@ pub struct WeeekClient {
     http: reqwest::Client,
     base_url: String,
     token: Option<String>,
+    max_attachment_bytes: usize,
 }
 
 impl WeeekClient {
@@ -37,6 +49,7 @@ impl WeeekClient {
             http,
             base_url: cfg.base_url.clone(),
             token,
+            max_attachment_bytes: cfg.max_attachment_bytes,
         }
     }
 
@@ -85,7 +98,7 @@ impl WeeekClient {
         if !status.is_success() {
             return Err(WeeekError::Api {
                 status: status.as_u16(),
-                body: text,
+                body: cap_error_body(text),
             });
         }
         if text.is_empty() {
@@ -113,7 +126,7 @@ impl WeeekClient {
             .map_err(net)?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
-            let body = response.text().await.unwrap_or_default();
+            let body = cap_error_body(response.text().await.unwrap_or_default());
             return Err(WeeekError::Api { status, body });
         }
         let content_type = response
@@ -128,7 +141,27 @@ impl WeeekClient {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_string();
-        let bytes = response.bytes().await.map_err(net)?;
+
+        // Скачиваем с жёстким лимитом: без него большое вложение съело бы всю память.
+        let max_bytes = self.max_attachment_bytes;
+        if let Some(length) = response.content_length()
+            && length as usize > max_bytes
+        {
+            return Err(WeeekError::Io(format!(
+                "вложение больше лимита ({length} > {max_bytes} байт). Увеличьте WEEEK_MAX_ATTACHMENT_BYTES, если это ожидаемо."
+            )));
+        }
+        let mut bytes: Vec<u8> = Vec::new();
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(net)?;
+            if bytes.len() + chunk.len() > max_bytes {
+                return Err(WeeekError::Io(format!(
+                    "вложение превысило лимит {max_bytes} байт — скачивание остановлено (WEEEK_MAX_ATTACHMENT_BYTES)."
+                )));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
 
         let mut name = parse_filename(&disposition).unwrap_or_default();
         if name.is_empty() {
@@ -186,9 +219,9 @@ fn percent_decode(s: &str) -> String {
     while i < bytes.len() {
         if bytes[i] == b'%'
             && i + 2 < bytes.len()
-            && let Ok(byte) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+            && let (Some(high), Some(low)) = (hex_digit(bytes[i + 1]), hex_digit(bytes[i + 2]))
         {
-            out.push(byte);
+            out.push(high * 16 + low);
             i += 3;
             continue;
         }
@@ -196,6 +229,15 @@ fn percent_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).to_string()
+}
+
+fn hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn mime_extension(content_type: &str) -> &'static str {
@@ -220,10 +262,64 @@ fn mime_extension(content_type: &str) -> &'static str {
 }
 
 fn sanitize_filename(name: &str) -> String {
-    name.chars()
+    let replaced: String = name
+        .chars()
         .map(|c| match c {
             '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
             other => other,
         })
-        .collect()
+        .collect();
+    // Windows молча отбрасывает хвостовые точки и пробелы — срезаем сами.
+    let trimmed = replaced.trim_end_matches([' ', '.']).to_string();
+    let candidate = if trimmed.is_empty() {
+        "attachment".to_string()
+    } else {
+        trimmed
+    };
+    // Зарезервированные имена устройств (CON, NUL, COM1–9, LPT1–9, …) нельзя занимать файлом.
+    let base = candidate
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .to_ascii_uppercase();
+    let reserved = matches!(base.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (base.len() == 4
+            && (base.starts_with("COM") || base.starts_with("LPT"))
+            && base.as_bytes()[3].is_ascii_digit()
+            && base.as_bytes()[3] != b'0');
+    if reserved {
+        format!("_{candidate}")
+    } else {
+        candidate
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_rejects_windows_reserved_names() {
+        assert_eq!(sanitize_filename("CON"), "_CON");
+        assert_eq!(sanitize_filename("con.txt"), "_con.txt");
+        assert_eq!(sanitize_filename("LPT9.pdf"), "_LPT9.pdf");
+        assert_eq!(sanitize_filename("COM0.txt"), "COM0.txt");
+        assert_eq!(sanitize_filename("report.docx"), "report.docx");
+    }
+
+    #[test]
+    fn sanitize_strips_trailing_dots_and_spaces() {
+        assert_eq!(sanitize_filename("name.txt. "), "name.txt");
+        assert_eq!(sanitize_filename("..."), "attachment");
+        assert_eq!(sanitize_filename("a/b:c"), "a_b_c");
+    }
+
+    #[test]
+    fn percent_decode_is_byte_safe() {
+        assert_eq!(percent_decode("%D1%82%D0%B5%D1%81%D1%82"), "тест");
+        // многобайтный символ перед '%' раньше мог вызвать панику по границе char
+        assert_eq!(percent_decode("€%2E"), "€.");
+        assert_eq!(percent_decode("100%"), "100%");
+        assert_eq!(percent_decode("bad%zz"), "bad%zz");
+    }
 }

@@ -36,6 +36,7 @@ cargo build --release
 | `WEEEK_MAX_RESPONSE_CHARS` | `60000` | Обрезка больших ответов. |
 | `WEEEK_DISABLE_KEYCHAIN` | — | `1` — не читать токен из системного хранилища. |
 | `WEEEK_KEYCHAIN_ACCOUNT` | `api-token` | Имя записи в системном хранилище (для нескольких аккаунтов). |
+| `WEEEK_MAX_ATTACHMENT_BYTES` | `67108864` (64 МиБ) | Лимит скачивания вложения (защита от гигантских ответов). |
 
 ### Откуда берётся токен
 
@@ -98,6 +99,9 @@ weeeking --help                         справка
 
 Любой другой MCP-клиент: команда — путь к бинарнику, транспорт — stdio.
 
+> Форма записи выше — V1-совместимая (проверена на OpenCode 2.0.24). Native V2-форма
+> (`"mcp": { "servers": { … } }`, `"disabled": false`) поддерживается наравне.
+
 ## Обновление спецификации
 
 ```bash
@@ -122,8 +126,9 @@ pwsh -ExecutionPolicy Bypass -File tools\rebuild.ps1
 
 `legacy/` — прежняя TypeScript-реализация (референс, в OpenCode не подключена).
 
-> Примечание: OpenCode V2 не запускает LSP-серверы, поэтому rust-analyzer используется в редакторе/CLI,
-> а диагностика для агента — через `cargo check`, `cargo clippy` и `cargo test`.
+> Примечание: OpenCode V2 не запускает LSP-серверы нативно. Для семантики в агенте подключён MCP-сервер
+> `rust-analyzer-mcp` (см. `.opencode/opencode.jsonc`) — hover, references, rename, diagnostics по воркспейсу;
+> сам rust-analyzer доступен и в редакторе/CLI, базовая проверка — `cargo check` / `cargo clippy` / `cargo test`.
 
 ## Ограничения API Weeek (важно агенту)
 

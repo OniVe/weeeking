@@ -415,9 +415,8 @@ impl WeeekingServer {
             .first()
             .map(|p| p.name.clone())
             .unwrap_or_else(|| "file_id".to_string());
-        let path = op
-            .path
-            .replace(&format!("{{{param_name}}}"), &encode_segment(&file_id));
+        let encoded = encode_path_segment(&file_id)?;
+        let path = op.path.replace(&format!("{{{param_name}}}"), &encoded);
         self.client.download(&path).await.map_err(|e| e.to_string())
     }
 

@@ -9,6 +9,8 @@ pub struct Config {
     pub disable_keychain: bool,
     /// Имя записи в системном хранилище (мультиаккаунт), по умолчанию `api-token`.
     pub keychain_account: String,
+    /// Лимит на скачивание вложения (защита от гигантских ответов), по умолчанию 64 МиБ.
+    pub max_attachment_bytes: usize,
 }
 
 /// Нормализует имя аккаунта из значения переменной окружения.
@@ -52,6 +54,11 @@ impl Config {
             "1" | "true" | "yes"
         );
         let keychain_account = keychain_account_from(env::var("WEEEK_KEYCHAIN_ACCOUNT").ok());
+        let max_attachment_bytes = env::var("WEEEK_MAX_ATTACHMENT_BYTES")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(64 * 1024 * 1024);
 
         Self {
             base_url,
@@ -60,6 +67,7 @@ impl Config {
             max_chars,
             disable_keychain,
             keychain_account,
+            max_attachment_bytes,
         }
     }
 }

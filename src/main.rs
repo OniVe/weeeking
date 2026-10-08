@@ -46,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("store-token") => {
-            let account = account_arg(&args[1..]);
+            let account = config::keychain_account_from(Some(account_arg(&args[1..])));
             token::store_token(&account)?;
             return Ok(());
         }

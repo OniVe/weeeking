@@ -163,10 +163,9 @@ async fn run_op(
         match params.get(&param.name) {
             Some(value) if !value.is_null() => {
                 used.insert(param.name.clone());
-                path = path.replace(
-                    &format!("{{{}}}", param.name),
-                    &encode_segment(&scalar_string(value)),
-                );
+                let encoded = encode_path_segment(&scalar_string(value))
+                    .map_err(|e| format!("{e} (параметр «{}», операция {})", param.name, op.id))?;
+                path = path.replace(&format!("{{{}}}", param.name), &encoded);
             }
             _ => {
                 if param.required {
@@ -181,14 +180,37 @@ async fn run_op(
 
     let mut query: Vec<(String, String)> = Vec::new();
     for param in &op.query_params {
-        if let Some(value) = params.get(&param.name) {
-            push_query(&mut query, &param.name, value);
-            used.insert(param.name.clone());
+        match params.get(&param.name) {
+            None | Some(Value::Null) => {
+                if param.required {
+                    return Err(format!(
+                        "Не задан обязательный query-параметр «{}» для {}.",
+                        param.name, op.id
+                    ));
+                }
+            }
+            Some(value) => {
+                push_query(&mut query, &param.name, value);
+                used.insert(param.name.clone());
+            }
         }
     }
 
     let extras: Vec<&String> = params.keys().filter(|key| !used.contains(*key)).collect();
     let body = if op.has_body {
+        for field in &op.body_fields {
+            if field.required {
+                match params.get(&field.name) {
+                    None | Some(Value::Null) => {
+                        return Err(format!(
+                            "Не задан обязательный параметр «{}» (body) для {}.",
+                            field.name, op.id
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
         let mut map = Map::new();
         for key in extras {
             if let Some(value) = params.get(key) {

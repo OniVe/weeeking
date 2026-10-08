@@ -226,3 +226,55 @@ fn cli_unknown_command_exits_2() {
         "unknown command must exit with code 2"
     );
 }
+
+#[test]
+fn required_params_are_validated_client_side() {
+    let mut client = Client::start(&[("READ_ONLY", "false")]);
+
+    let boards = client.call_tool(3, "weeek_board", json!({ "action": "get-boards" }));
+    let text = boards["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert_eq!(
+        boards["result"]["isError"], true,
+        "get-boards without projectId must fail"
+    );
+    assert!(
+        text.contains("обязательный query-параметр"),
+        "get-boards without projectId must be caught client-side: {text}"
+    );
+
+    let project = client.call_tool(4, "weeek_project", json!({ "action": "create-project" }));
+    let text = project["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert_eq!(
+        project["result"]["isError"], true,
+        "create-project without name must fail"
+    );
+    assert!(
+        text.contains("(body)"),
+        "create-project without name must be caught client-side: {text}"
+    );
+}
+
+#[test]
+fn dot_segment_path_params_are_rejected() {
+    let mut client = Client::start(&[]);
+    let call = client.call_tool(
+        3,
+        "weeek_project",
+        json!({ "action": "get-project", "params": { "id": ".." } }),
+    );
+    let text = call["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert_eq!(
+        call["result"]["isError"], true,
+        "dot-segment id must be rejected"
+    );
+    assert!(
+        text.contains("сегменты"),
+        "dot-segment rejection must explain the reason: {text}"
+    );
+}

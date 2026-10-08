@@ -64,6 +64,9 @@ const typeOf = (s) => {
   return typeof t === "string" ? t : "object";
 };
 
+// Карта slug'ов лежит в mod.slugs.tags; mod.slugs — контейнер { operations, tags }.
+const slugMap = mod.slugs?.tags ?? mod.slugs ?? {};
+
 const operations = {};
 const groups = new Map();
 let total = 0;
@@ -75,7 +78,7 @@ for (const [p, opsObj] of Object.entries(schema.paths)) {
     if (!op.operationId) throw new Error(`operation without operationId: ${m} ${p}`);
 
     const label = op.tags?.[0] ?? "Other";
-    const rawSlug = slugs[label] ?? label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const rawSlug = slugMap[label] ?? label.toLowerCase().replace(/[^a-z0-9]+/g, "-");
     const slug = SLUG_FIX[rawSlug] ?? rawSlug;
     const def = {
       id: op.operationId,
