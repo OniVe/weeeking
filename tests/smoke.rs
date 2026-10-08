@@ -317,3 +317,47 @@ fn wrong_param_types_are_rejected() {
         "wrong type must be rejected client-side: {text}"
     );
 }
+
+#[test]
+fn path_params_are_validated_for_empty_and_type() {
+    let mut client = Client::start(&[]);
+
+    let empty = client.call_tool(
+        3,
+        "weeek_project",
+        json!({ "action": "get-project", "params": { "id": "" } }),
+    );
+    let text = empty["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        text.contains("пустая строка"),
+        "empty path param must be rejected: {text}"
+    );
+
+    let wrong = client.call_tool(
+        4,
+        "weeek_tags",
+        json!({ "action": "get-tag", "params": { "id": "abc" } }),
+    );
+    let text = wrong["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        text.contains("ожидает тип"),
+        "wrong-type path param must be rejected: {text}"
+    );
+
+    let valid = client.call_tool(
+        5,
+        "weeek_tags",
+        json!({ "action": "get-tag", "params": { "id": 1 } }),
+    );
+    let text = valid["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        text.contains("WEEEK_API_TOKEN"),
+        "valid path param must pass validation and reach the token check: {text}"
+    );
+}

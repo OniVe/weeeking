@@ -130,6 +130,9 @@ pub fn encode_segment(s: &str) -> String {
 /// url-нормализация схлопнула бы `/tm/projects/..` в `/tm/` и увела бы write-метод
 /// на родительский коллекционный endpoint.
 pub fn encode_path_segment(value: &str) -> Result<String, String> {
+    if value.trim().is_empty() {
+        return Err("недопустимый path-параметр: пустая строка.".to_string());
+    }
     if value == "." || value == ".." {
         return Err(format!(
             "недопустимый path-параметр «{value}»: сегменты '.' и '..' запрещены."
@@ -178,6 +181,8 @@ mod tests {
     fn dot_segments_are_rejected() {
         assert!(encode_path_segment(".").is_err());
         assert!(encode_path_segment("..").is_err());
+        assert!(encode_path_segment("").is_err());
+        assert!(encode_path_segment("   ").is_err());
         assert_eq!(encode_path_segment("normal-id").unwrap(), "normal-id");
         assert_eq!(encode_path_segment("a b").unwrap(), "a%20b");
         assert_eq!(encode_path_segment("50%").unwrap(), "50%25");

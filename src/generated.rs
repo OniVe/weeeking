@@ -163,6 +163,8 @@ async fn run_op(
         match params.get(&param.name) {
             Some(value) if !value.is_null() => {
                 used.insert(param.name.clone());
+                validate_param_type(param, value)
+                    .map_err(|e| format!("{e} (операция {})", op.id))?;
                 let encoded = encode_path_segment(&scalar_string(value))
                     .map_err(|e| format!("{e} (параметр «{}», операция {})", param.name, op.id))?;
                 path = path.replace(&format!("{{{}}}", param.name), &encoded);
