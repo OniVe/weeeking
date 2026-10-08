@@ -69,9 +69,9 @@ async fn main() -> anyhow::Result<()> {
     let server = server::WeeekingServer::new(client, cfg.read_only, cfg.max_chars);
 
     eprintln!(
-        "[weeeking] готов. Спека: {} от {} ({} операций) — {}. READ_ONLY={}, токен: {}, API {}",
+        "[weeeking] готов. Спека: {} (chunk {}), {} операций — {}. READ_ONLY={}, токен: {}, API {}",
         spec::SPEC_TITLE,
-        spec::SPEC_GENERATED_AT,
+        spec::SPEC_VERSION,
         spec::OPERATIONS.len(),
         spec::SPEC_URL,
         cfg.read_only,

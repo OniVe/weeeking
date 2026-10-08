@@ -15,7 +15,7 @@
 - **READ_ONLY по умолчанию**: изменяющие действия не регистрируются, пока не выставлено `READ_ONLY=false`.
 - **Кодогенератор спеки**: `tools/update-spec.mjs` тянет OpenAPI с developers.weeek.net и генерирует
   `src/spec_generated.rs` — статические данные (`&'static str`), которые компилируются в бинарник;
-  в рантайме нет ни JSON, ни парсинга, чанк спеки нигде не сохраняется.
+  в рантайме нет ни JSON, ни парсинга, чанк спеки в репозитории не сохраняется.
 
 ## Сборка
 
@@ -67,7 +67,7 @@ WEEEK_KEYCHAIN_ACCOUNT=api-token-anna weeeking
 ```jsonc
 "weeek-anna": {
   "type": "local",
-  "command": ["C:\\project\\ai\\weeeking\\target\\release\\weeeking.exe"],
+  "command": ["C:\\путь\\weeeking.exe"],
   "enabled": true,
   "environment": {
     "WEEEK_KEYCHAIN_ACCOUNT": "api-token-anna",
@@ -92,7 +92,7 @@ weeeking --help                         справка
 ```jsonc
 "weeek": {
   "type": "local",
-  "command": ["C:\\project\\ai\\weeeking\\target\\release\\weeeking.exe"],
+  "command": ["C:\\путь\\weeeking.exe"],
   "enabled": true,
   "environment": { "READ_ONLY": "false" }
 }

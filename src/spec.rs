@@ -4,7 +4,9 @@
 //! официальной OpenAPI (developers.weeek.net) и компилируются в бинарник —
 //! в рантайме нет ни JSON, ни парсинга.
 
-pub use crate::spec_generated::{GROUPS, OPERATIONS, SPEC_GENERATED_AT, SPEC_TITLE, SPEC_URL};
+#[cfg(test)]
+pub use crate::spec_generated::CURATED;
+pub use crate::spec_generated::{GROUPS, OPERATIONS, SPEC_TITLE, SPEC_URL, SPEC_VERSION};
 
 #[derive(Debug)]
 pub struct ParamDef {
@@ -52,26 +54,56 @@ mod tests {
         let ids: HashSet<&str> = OPERATIONS.iter().map(|op| op.id).collect();
         assert_eq!(ids.len(), OPERATIONS.len(), "operation ids must be unique");
 
+        // Группы: непустые уникальные slug/label, ссылки резолвятся, без дублей между группами.
+        let slugs: HashSet<&str> = GROUPS.iter().map(|g| g.slug).collect();
+        assert_eq!(slugs.len(), GROUPS.len(), "group slugs must be unique");
         for group in GROUPS {
+            assert!(!group.slug.is_empty(), "group slug must not be empty");
+            assert!(!group.label.is_empty(), "group label must not be empty");
             assert!(
                 !group.op_ids.is_empty(),
                 "group {} must have operations",
                 group.slug
             );
+        }
+
+        let mut grouped_seen: HashSet<&str> = HashSet::new();
+        for group in GROUPS {
             for op_id in group.op_ids {
                 assert!(
                     ids.contains(*op_id),
                     "group {} references unknown operation {op_id}",
                     group.slug
                 );
+                assert!(
+                    grouped_seen.insert(*op_id),
+                    "operation {op_id} is listed in more than one group"
+                );
             }
         }
 
-        // Каждая операция — либо ровно в одной группе, либо curated (вне групп).
-        let grouped: usize = GROUPS.iter().map(|g| g.op_ids.len()).sum();
-        assert!(
-            grouped <= OPERATIONS.len(),
-            "grouped operations cannot exceed the total"
+        let curated: HashSet<&str> = CURATED.iter().copied().collect();
+        assert_eq!(curated.len(), CURATED.len(), "curated ids must be unique");
+
+        // Каждая операция достижима ровно один раз: либо в группе, либо curated.
+        for id in &grouped_seen {
+            assert!(
+                !curated.contains(id),
+                "operation {id} cannot be both grouped and curated"
+            );
+        }
+        let reachable: HashSet<&str> = grouped_seen.union(&curated).copied().collect();
+        assert_eq!(
+            reachable.len(),
+            OPERATIONS.len(),
+            "every operation must be reachable exactly once (grouped or curated)"
         );
+        for op in OPERATIONS {
+            assert!(
+                reachable.contains(op.id),
+                "operation {} is unreachable",
+                op.id
+            );
+        }
     }
 }
