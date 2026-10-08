@@ -278,3 +278,42 @@ fn dot_segment_path_params_are_rejected() {
         "dot-segment rejection must explain the reason: {text}"
     );
 }
+
+#[test]
+fn explicit_null_optional_query_is_ignored() {
+    let mut client = Client::start(&[]);
+    let call = client.call_tool(
+        3,
+        "weeek_contacts",
+        json!({ "action": "get-contacts", "params": { "search": null } }),
+    );
+    let text = call["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        !text.contains("не принимает параметры"),
+        "explicit null must not become an unexpected-params error: {text}"
+    );
+    assert!(
+        text.contains("WEEEK_API_TOKEN"),
+        "call must pass validation and reach the token check: {text}"
+    );
+}
+
+#[test]
+fn wrong_param_types_are_rejected() {
+    let mut client = Client::start(&[]);
+    let call = client.call_tool(
+        3,
+        "weeek_board",
+        json!({ "action": "get-boards", "params": { "projectId": "abc" } }),
+    );
+    let text = call["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert_eq!(call["result"]["isError"], true);
+    assert!(
+        text.contains("ожидает тип"),
+        "wrong type must be rejected client-side: {text}"
+    );
+}

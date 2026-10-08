@@ -23,9 +23,10 @@ jobs:
     steps:
       # actions/checkout@v4 (запиннено по SHA)
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      # dtolnay/rust-toolchain@stable (запиннено по SHA)
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d
+      # dtolnay/rust-toolchain, master (запиннено по SHA из истории master; toolchain задаётся явно)
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
         with:
+          toolchain: stable
           components: rustfmt, clippy
       # Swatinem/rust-cache@v2 (запиннено по SHA)
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
@@ -53,7 +54,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+        with:
+          toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       - run: cargo build --release --locked
       - name: Package (Windows)

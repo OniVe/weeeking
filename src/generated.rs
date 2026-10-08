@@ -1,6 +1,6 @@
 use crate::http::WeeekClient;
 use crate::server::WeeekingServer;
-use crate::spec::{OpDef, Spec};
+use crate::spec::{OpDef, ParamDef, Spec};
 use crate::util::*;
 use rmcp::model::Tool;
 use serde_json::{Map, Value, json};
@@ -188,8 +188,15 @@ async fn run_op(
                         param.name, op.id
                     ));
                 }
+                if params.contains_key(&param.name) {
+                    // Явный null для необязательного параметра: потребляем и игнорируем,
+                    // чтобы он не всплыл как «лишний параметр» (или не утёк в body).
+                    used.insert(param.name.clone());
+                }
             }
             Some(value) => {
+                validate_param_type(param, value)
+                    .map_err(|e| format!("{e} (операция {})", op.id))?;
                 push_query(&mut query, &param.name, value);
                 used.insert(param.name.clone());
             }
@@ -199,15 +206,19 @@ async fn run_op(
     let extras: Vec<&String> = params.keys().filter(|key| !used.contains(*key)).collect();
     let body = if op.has_body {
         for field in &op.body_fields {
-            if field.required {
-                match params.get(&field.name) {
-                    None | Some(Value::Null) => {
+            match params.get(&field.name) {
+                None | Some(Value::Null) => {
+                    if field.required {
                         return Err(format!(
                             "Не задан обязательный параметр «{}» (body) для {}.",
                             field.name, op.id
                         ));
                     }
-                    _ => {}
+                }
+                Some(value) => {
+                    // null в body проходит насквозь (семантика «очистить»), типы — проверяем.
+                    validate_param_type(field, value)
+                        .map_err(|e| format!("{e} (операция {})", op.id))?;
                 }
             }
         }
@@ -243,5 +254,24 @@ fn scalar_string(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
         other => other.to_string(),
+    }
+}
+
+/// Проверяет скалярные типы, заявленные в спеке (integer/boolean/string).
+/// Составные и союзные типы («array», «integer|null», …) пропускаются как есть.
+fn validate_param_type(param: &ParamDef, value: &Value) -> Result<(), String> {
+    let ok = match param.ty.as_str() {
+        "integer" => value.is_i64() || value.is_u64(),
+        "boolean" => value.is_boolean(),
+        "string" => value.is_string(),
+        _ => true,
+    };
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "Параметр «{}» ожидает тип «{}».",
+            param.name, param.ty
+        ))
     }
 }
