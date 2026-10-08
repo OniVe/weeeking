@@ -163,7 +163,7 @@ async fn run_op(
         match params.get(&param.name) {
             Some(value) if !value.is_null() => {
                 used.insert(param.name.clone());
-                validate_param_type(param, value)
+                validate_path_param(param, value)
                     .map_err(|e| format!("{e} (операция {})", op.id))?;
                 let encoded = encode_path_segment(&scalar_string(value))
                     .map_err(|e| format!("{e} (параметр «{}», операция {})", param.name, op.id))?;
@@ -275,5 +275,22 @@ fn validate_param_type(param: &ParamDef, value: &Value) -> Result<(), String> {
             "Параметр «{}» ожидает тип «{}».",
             param.name, param.ty
         ))
+    }
+}
+
+/// Как `validate_param_type`, но для string-path-параметров допускает числовой id
+/// (LLM часто шлёт `42` вместо `"42"`, и API это принимает) — значение коэрсится в строку.
+fn validate_path_param(param: &ParamDef, value: &Value) -> Result<(), String> {
+    if param.ty == "string" {
+        if value.is_string() || value.is_i64() || value.is_u64() {
+            Ok(())
+        } else {
+            Err(format!(
+                "Параметр «{}» ожидает строку или целое число.",
+                param.name
+            ))
+        }
+    } else {
+        validate_param_type(param, value)
     }
 }

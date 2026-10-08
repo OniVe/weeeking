@@ -360,4 +360,18 @@ fn path_params_are_validated_for_empty_and_type() {
         text.contains("WEEEK_API_TOKEN"),
         "valid path param must pass validation and reach the token check: {text}"
     );
+
+    // string-типизированный id: числовое значение коэрсится в строку (LLM-эргономика)
+    let coerced = client.call_tool(
+        6,
+        "weeek_project",
+        json!({ "action": "get-project", "params": { "id": 42 } }),
+    );
+    let text = coerced["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        text.contains("WEEEK_API_TOKEN"),
+        "numeric id for a string path param must be coerced and reach the token check: {text}"
+    );
 }
