@@ -1,6 +1,8 @@
 /target
 desktop.ini
 *.log
+__pycache__/
+*.pyc
 
 # локальные настройки OpenCode: всё содержимое скрыто, но проектные скиллы коммитятся
 /.opencode/*

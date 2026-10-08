@@ -13,7 +13,7 @@
   `weeek_list_comments`, `weeek_download_attachment` + записи (`weeek_create_task`, `weeek_update_task`,
   `weeek_move_task`, `weeek_complete_task`, `weeek_set_task_people`, `weeek_add_comment`, `weeek_delete_comment`).
 - **READ_ONLY по умолчанию**: изменяющие действия не регистрируются, пока не выставлено `READ_ONLY=false`.
-- **Кодогенератор спеки**: `tools/update-spec.mjs` тянет OpenAPI с developers.weeek.net и генерирует
+- **Кодогенератор спеки**: `tools/update_spec.py` тянет OpenAPI с developers.weeek.net и генерирует
   `src/spec_generated.rs` — статические данные (`&'static str`), которые компилируются в бинарник;
   в рантайме нет ни JSON, ни парсинга, чанк спеки в репозитории не сохраняется.
 
@@ -106,7 +106,8 @@ weeeking --help                         справка
 ## Обновление спецификации
 
 ```bash
-node tools/update-spec.mjs    # developers.weeek.net → src/spec_generated.rs (кодогенерация)
+pip install quickjs            # зависимость кодогенератора (один раз)
+python tools/update_spec.py    # developers.weeek.net → src/spec_generated.rs (кодогенерация)
 cargo fmt && cargo build --release
 ```
 
@@ -120,9 +121,8 @@ cargo test                   # smoke: read-only и полный режимы (б
 
 Пересборка при работающем OpenCode (exe залочен запущенным MCP-сервером):
 
-```powershell
-pwsh -ExecutionPolicy Bypass -File tools\rebuild.ps1
-# или из сессии pwsh: powershell -ExecutionPolicy Bypass -File tools\rebuild.ps1
+```bash
+python tools\rebuild.py
 ```
 
 ## Ограничения API Weeek (важно агенту)
