@@ -11,3 +11,7 @@ __pycache__/
 
 # локальные инструкции для агентов — в репозиторий не идут
 /AGENTS.md
+
+# npm-обёртка: скачанные бинарники и node_modules
+/npm/node_modules/
+/npm/vendor/

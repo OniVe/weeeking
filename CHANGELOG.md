@@ -17,6 +17,9 @@
   сетевые сбои (кроме таймаутов) — только для идемпотентных GET/HEAD. Настройки `WEEEK_RETRY_MAX`,
   `WEEEK_RETRY_BASE_MS`.
 - `WEEEK_LOG=debug` — HTTP-логи в stderr (метод, путь, статус, длительность) без токена.
+- npm-пакет `weeeking` (npx): обёртка скачивает нативный бинарник (Windows x64 / Linux x64) из
+  GitHub Releases с проверкой sha256; в релизы добавлены сырые бинарники `weeeking-win32-x64.exe`
+  и `weeeking-linux-x64` (+ `.sha256`); публикация — npm trusted publishing (OIDC, provenance).
 
 ### Изменено
 

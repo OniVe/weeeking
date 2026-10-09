@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "weeeking",
+  "version": "0.1.0",
+  "description": "MCP server for Weeek with full public API coverage. Installs the native weeeking binary (Windows x64 / Linux x64) and runs it.",
+  "license": "MIT",
+  "author": "OniVe",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OniVe/weeeking.git"
+  },
+  "homepage": "https://github.com/OniVe/weeeking#readme",
+  "bugs": {
+    "url": "https://github.com/OniVe/weeeking/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "weeek",
+    "weeeking",
+    "tasks"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "weeeking": "bin/weeeking.js"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/install.js",
+    "test": "node --test"
+  }
+}

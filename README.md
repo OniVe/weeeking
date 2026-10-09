@@ -49,6 +49,15 @@ certutil -hashfile weeeking-x86_64-pc-windows-msvc.zip SHA256   # Windows
 sha256sum -c weeeking-x86_64-unknown-linux-gnu.tar.gz.sha256     # Linux
 ```
 
+### npm (npx)
+
+```bash
+npx -y weeeking     # MCP-сервер по stdio; бинарник скачается и проверится по sha256
+```
+
+Пакет `weeeking` — тонкая обёртка: берёт нативный бинарник нужной платформы (Windows x64 / Linux x64)
+из GitHub Releases этой же версии. Публикуется через npm trusted publishing (OIDC, с provenance).
+
 ## Переменные окружения
 
 | Переменная | По умолчанию | Описание |

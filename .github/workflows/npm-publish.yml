@@ -1,0 +1,78 @@
+name: npm
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC trusted publishing (provenance генерируется автоматически)
+    steps:
+      # actions/checkout@v7.0.1 (запиннено по SHA)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # actions/setup-node@v7.1.0 (запиннено по SHA)
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+      - name: Require npm >= 11.5.1 for trusted publishing
+        run: |
+          version="$(npm --version)"
+          echo "npm ${version}"
+          node -e 'const [major, minor] = process.argv[1].split(".").map(Number); process.exit(major > 11 || (major === 11 && minor >= 5) ? 0 : 1)' "${version}"
+      - name: Check version matches the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: npm
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "npm/package.json version ${version} does not match tag ${GITHUB_REF_NAME}"; exit 1
+          fi
+      - name: Test wrapper
+        working-directory: npm
+        run: node --test
+      - name: Check registry
+        id: registry
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: npm
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if npm view "weeeking@${version}" version >/dev/null 2>&1; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Wait for release assets
+        if: startsWith(github.ref, 'refs/tags/v') && steps.registry.outputs.already == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 60); do
+            assets=$(gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets[].name' 2>/dev/null || true)
+            ready=true
+            for name in weeeking-win32-x64.exe weeeking-win32-x64.exe.sha256 weeeking-linux-x64 weeeking-linux-x64.sha256; do
+              if ! grep -qx "${name}" <<<"${assets}"; then
+                ready=false
+              fi
+            done
+            if [ "${ready}" = true ]; then
+              echo "release assets ready"; exit 0
+            fi
+            echo "waiting for release assets (attempt ${attempt}/60)"
+            sleep 10
+          done
+          echo "release assets did not appear in time"; exit 1
+      - name: Publish (OIDC trusted publishing)
+        if: startsWith(github.ref, 'refs/tags/v') && steps.registry.outputs.already == 'false'
+        working-directory: npm
+        run: npm publish
