@@ -2,6 +2,31 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [0.3.0] — 2026-10-09
+
+Шесть целевых платформ, версия в именах артефактов, SHA256-хэши в описании релиза и автоматическая
+публикация npm из CI через OIDC.
+
+### Добавлено
+
+- Платформы: Windows x64, Linux x64 (glibc и musl-static), Linux arm64, macOS arm64 и x64;
+  проверочная сборка всех платформ в CI (`build-matrix` на main) + musl-прогон в alpine.
+- Имена артефактов с версией: `weeeking-<версия>-<платформа>` (архивы и сырые бинарники для npm).
+- Секция SHA256 всех артефактов в описании релиза (job `release-notes`).
+- CI-проверка переводов строк (`.gitattributes`, LF); `linguist-generated` для генерируемых файлов.
+- npm-обёртка: детект libc на Linux x64 (gnu/musl), новые платформы, vendor/cache по ключу платформы.
+- Публикация npm из CI через OIDC trusted publishing (provenance) — без локальных публикаций.
+
+### Изменено
+
+- Релиз создаётся черновиком и становится публичным только после полной сборки и добавления хэшей;
+  npm-публикация ждёт `isDraft=false` и все raw-ассеты.
+- Заголовок релиза — `vX.Y.Z Release of Weeeking`, шапка — сравнение с предыдущим релизом.
+
+### Исправлено
+
+- Windows: шаг сборки в CI выполняется в bash — `--target` больше не теряется.
+
 ## [0.2.0] — 2026-10-09
 
 ### Добавлено
@@ -52,5 +77,6 @@
 - Булевы query-параметры (например, `completed`) уходят в Weeek как `1/0`: вариант `true/false`
   API отклоняет с HTTP 422. Найдено приёмочным smoke-тестом перед релизом.
 
+[0.3.0]: https://github.com/OniVe/weeeking/releases/tag/v0.3.0
 [0.2.0]: https://github.com/OniVe/weeeking/releases/tag/v0.2.0
 [0.1.0]: https://github.com/OniVe/weeeking/releases/tag/v0.1.0
