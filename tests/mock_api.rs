@@ -85,9 +85,14 @@ impl MockServer {
                         if item.delay_ms > 0 {
                             thread::sleep(Duration::from_millis(item.delay_ms));
                         }
+                        // Закрываем соединение после каждого ответа: иначе reqwest
+                        // переиспользует keep-alive из пула, а однопоточный tiny_http
+                        // под параллельными запросами (tokio::join!) может подвесить
+                        // один из них до клиентского таймаута.
                         let mut headers = vec![
                             Header::from_bytes(&b"Content-Type"[..], item.content_type.as_bytes())
                                 .unwrap(),
+                            Header::from_bytes(&b"Connection"[..], &b"close"[..]).unwrap(),
                         ];
                         if let Some(disposition) = &item.disposition {
                             headers.push(
