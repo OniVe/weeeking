@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "weeeking",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "MCP server for Weeek with full public API coverage. Installs the native weeeking binary (Windows x64/arm64, Linux x64 gnu/musl, Linux arm64, macOS arm64/x64) and runs it.",
   "license": "MIT",
   "author": "OniVe",
