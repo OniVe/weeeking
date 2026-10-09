@@ -145,6 +145,7 @@ jobs:
         with:
           key: ${{ matrix.key }}
       - name: Build release
+        shell: bash
         run: cargo build --release --locked --target "${TARGET}"
       - name: Smoke (--help)
         shell: bash
@@ -235,6 +236,7 @@ jobs:
           fi
           echo "VERSION=${version}" >> "$GITHUB_ENV"
       - name: Build release
+        shell: bash
         run: cargo build --release --locked --target "${TARGET}"
       - name: Package (Windows)
         if: runner.os == 'Windows'
