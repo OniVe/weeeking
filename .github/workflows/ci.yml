@@ -21,10 +21,10 @@ jobs:
         os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      # actions/checkout@v4 (запиннено по SHA)
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # actions/checkout@v7.0.1 (запиннено по SHA)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       # dtolnay/rust-toolchain, master (запиннено по SHA из истории master; toolchain задаётся явно)
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
         with:
           toolchain: stable
           components: rustfmt, clippy
@@ -53,8 +53,8 @@ jobs:
             archive: weeeking-x86_64-unknown-linux-gnu.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
@@ -81,8 +81,8 @@ jobs:
         run: |
           tar -czf ${{ matrix.archive }} -C target/release weeeking
           sha256sum ${{ matrix.archive }} > ${{ matrix.archive }}.sha256
-      # softprops/action-gh-release@v2 (запиннено по SHA)
-      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
+      # softprops/action-gh-release@v3.0.3 (запиннено по SHA)
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
         with:
           body_path: .github/release-body.md
           files: |

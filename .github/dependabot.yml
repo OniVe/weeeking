@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Rust-зависимости: минорные и патч-обновления одним PR, мажоры — отдельно
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-patch:
+        update-types: ["minor", "patch"]
+  # GitHub Actions (в workflow — пины по SHA; обновления приходят PR-ами)
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]

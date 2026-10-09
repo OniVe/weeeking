@@ -1,5 +1,9 @@
 # Weeeking 🛡️
 
+[![CI](https://github.com/OniVe/weeeking/actions/workflows/ci.yml/badge.svg)](https://github.com/OniVe/weeeking/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/OniVe/weeeking)](https://github.com/OniVe/weeeking/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 > *Weeek and conquer.* MCP-сервер для [Weeek](https://weeek.net) с **полным покрытием публичного API**:
 > 157 операций из официальной OpenAPI-спецификации. Один бинарник на Rust, без Node и внешних зависимостей
 > в рантайме. Целевые платформы пилота: **Windows x86_64 и Linux x86_64**.
