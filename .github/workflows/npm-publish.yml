@@ -59,29 +59,33 @@ jobs:
         working-directory: npm
         run: |
           version=$(node -p "require('./package.json').version")
-          raws=(
+          files=(
+            "weeeking-${version}-win-x64.zip"
+            "weeeking-${version}-win-x64.zip.sha256"
             "weeeking-${version}-win-x64.exe"
-            "weeeking-${version}-linux-x64"
-            "weeeking-${version}-linux-musl-x64"
-            "weeeking-${version}-linux-arm64"
-            "weeeking-${version}-osx-arm64"
-            "weeeking-${version}-osx-x64"
+            "weeeking-${version}-win-x64.exe.sha256"
           )
+          for key in linux-x64 linux-musl-x64 linux-arm64 osx-arm64 osx-x64; do
+            files+=(
+              "weeeking-${version}-${key}.tar.gz"
+              "weeeking-${version}-${key}.tar.gz.sha256"
+              "weeeking-${version}-${key}"
+              "weeeking-${version}-${key}.sha256"
+            )
+          done
           for attempt in $(seq 1 240); do
             draft=$(gh release view "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft' 2>/dev/null || echo true)
             assets=$(gh release view "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name' 2>/dev/null || true)
             ready=true
-            for raw in "${raws[@]}"; do
-              for name in "${raw}" "${raw}.sha256"; do
-                if ! grep -qx "${name}" <<<"${assets}"; then
-                  ready=false
-                fi
-              done
+            for name in "${files[@]}"; do
+              if ! grep -qxF "${name}" <<<"${assets}"; then
+                ready=false
+              fi
             done
             if [ "${ready}" = true ] && [ "${draft}" = "false" ]; then
-              echo "release is published with all assets"; exit 0
+              echo "release is published with the complete asset set"; exit 0
             fi
-            echo "waiting for release assets (attempt ${attempt}/240)"
+            echo "waiting for the complete release (attempt ${attempt}/240)"
             sleep 10
           done
           echo "release assets did not appear in time"; exit 1

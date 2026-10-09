@@ -163,8 +163,6 @@ jobs:
     name: release (${{ matrix.key }})
     if: startsWith(github.ref, 'refs/tags/v')
     needs: test
-    permissions:
-      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -292,37 +290,83 @@ jobs:
             echo "${RAW}.sha256"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-      # softprops/action-gh-release@v3.0.3 (запиннено по SHA)
-      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
+      # actions/upload-artifact@v7.0.2 (запиннено по SHA)
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: ${{ github.ref_name }} Release of Weeeking
-          # Черновик: публикуем релиз только после полного набора ассетов и секции хэшей
-          # (снимает draft job release-notes).
-          draft: true
-          body_path: .github/release-body.md
-          files: ${{ steps.files.outputs.list }}
+          name: ${{ matrix.key }}
+          path: ${{ steps.files.outputs.list }}
+          if-no-files-found: error
 
-  # После сборки всех платформ дописывает в тело релиза секцию SHA256
-  # (как у PowerShell). Тело детерминированно: release-body.md + сгенерированная секция,
-  # поэтому повторный полный прогон не даёт дублей.
-  release-notes:
-    name: release notes (hashes)
+  # Публикация «всё или ничего»: леги выше ничего не пишут в GitHub Releases — они собирают
+  # файлы и отдают их workflow-артефактами. Один job скачивает полный набор, проверяет состав
+  # (24 файла) и sha256, затем создаёт ЧЕРНОВИК, заливает в него все ассеты и публикует его
+  # отдельным действием: публично релиз появляется только целиком. При сбое недосозданный
+  # черновик удаляется (плюс страховочный шаг if: always()), конкурентные прогоны сериализуются.
+  publish-release:
+    name: publish release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: release
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    concurrency:
+      group: publish-release-${{ github.ref }}
+      cancel-in-progress: false
+    env:
+      # gh не должен писать посторонние сообщения (update-notifier и т.п.):
+      # состояние релиза парсится из stdout API-вызовов.
+      GH_NO_UPDATE_NOTIFIER: "1"
+      NO_COLOR: "1"
     steps:
       # actions/checkout@v7.0.1 (запиннено по SHA)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - name: Append SHA256 hashes to the release body
-        env:
-          GH_TOKEN: ${{ github.token }}
+      # actions/download-artifact@v8.0.2 (запиннено по SHA)
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: "*"
+          merge-multiple: true
+          path: dist
+      - name: Verify the complete asset set
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf dist && mkdir dist
-          gh release download "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" -D dist
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match v${version}"; exit 1
+          fi
+          expected=""
+          add() { expected="${expected}$1"$'\n'; }
+          add "weeeking-${version}-win-x64.zip"
+          add "weeeking-${version}-win-x64.zip.sha256"
+          add "weeeking-${version}-win-x64.exe"
+          add "weeeking-${version}-win-x64.exe.sha256"
+          for key in linux-x64 linux-musl-x64 linux-arm64 osx-arm64 osx-x64; do
+            add "weeeking-${version}-${key}.tar.gz"
+            add "weeeking-${version}-${key}.tar.gz.sha256"
+            add "weeeking-${version}-${key}"
+            add "weeeking-${version}-${key}.sha256"
+          done
+          failed=0
+          for name in ${expected}; do
+            if [ ! -f "dist/${name}" ]; then echo "missing asset: ${name}"; failed=1; fi
+          done
+          count=$(find dist -maxdepth 1 -type f | wc -l)
+          if [ "${count}" -ne 24 ]; then echo "expected 24 files, got ${count}"; failed=1; fi
+          if [ "${failed}" -ne 0 ]; then echo "asset verification failed"; exit 1; fi
+          for f in dist/*; do
+            case "$f" in *.sha256) continue;; esac
+            want=$(cut -d' ' -f1 < "${f}.sha256")
+            got=$(sha256sum "$f" | cut -d' ' -f1)
+            if [ "${want}" != "${got}" ]; then echo "sha256 mismatch: ${f}"; failed=1; fi
+          done
+          if [ "${failed}" -ne 0 ]; then echo "asset verification failed"; exit 1; fi
+          printf '%s' "${expected}" > expected_names.txt
+          echo "all 24 assets verified"
+      - name: Build the release body (description + SHA256 section)
+        shell: bash
+        run: |
+          set -euo pipefail
           {
             echo
             echo "### SHA256 Hashes of the release artifacts"
@@ -335,10 +379,80 @@ jobs:
             echo "Суммы продублированы в файлах \`.sha256\` рядом с каждым артефактом."
           } > hashes.md
           cat .github/release-body.md hashes.md > body.md
-          gh release edit "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --notes-file body.md
-      - name: Publish the release (clear draft)
+      - name: Create draft, upload assets, publish
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh release edit "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --draft=false
+          set -euo pipefail
+          if [ ! -s expected_names.txt ]; then
+            echo "expected_names.txt is missing; aborting"; exit 1
+          fi
+          want_names=$(LC_ALL=C sort expected_names.txt | paste -sd, -)
+          # shellcheck source=.github/scripts/release-state.sh
+          source .github/scripts/release-state.sh
+          cleanup_incomplete() {
+            local state="$1"
+            case "${state}" in
+              "missing") echo "nothing to clean up (release is absent)";;
+              "ok false 24 ${want_names}") echo "complete release left in place";;
+              "error") echo "release state unknown; not touching anything";;
+              *) echo "removing incomplete release (${state})"
+                 gh release delete "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --yes || true;;
+            esac
+          }
+          state=$(release_state)
+          if [ "${state}" = "error" ]; then
+            echo "cannot determine the release state; aborting"; exit 1
+          fi
+          if [ "${state}" = "ok false 24 ${want_names}" ]; then
+            echo "release ${GITHUB_REF_NAME} is already published with the complete asset set; nothing to do"
+            exit 0
+          fi
+          if [ "${state}" != "missing" ]; then
+            echo "existing release is not the expected complete set (${state}); recreating"
+            gh release delete "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --yes
+          fi
+          if ! gh release create "${GITHUB_REF_NAME}" \
+              -R "${GITHUB_REPOSITORY}" \
+              --draft \
+              --verify-tag \
+              --title "${GITHUB_REF_NAME} Release of Weeeking" \
+              --notes-file body.md; then
+            echo "draft creation failed"
+            cleanup_incomplete "$(release_state)"
+            exit 1
+          fi
+          if ! gh release upload "${GITHUB_REF_NAME}" dist/* -R "${GITHUB_REPOSITORY}"; then
+            echo "asset upload failed"
+            cleanup_incomplete "$(release_state)"
+            exit 1
+          fi
+          if ! gh release edit "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --draft=false; then
+            echo "publishing failed"
+            cleanup_incomplete "$(release_state)"
+            exit 1
+          fi
+          echo "release ${GITHUB_REF_NAME} published with 24 assets"
+      - name: Cleanup after failure or cancellation
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # На успехе это no-op (релиз полный и опубликованный). Убирает только черновик или
+          # неполный релиз после сбоя, отмены или убийства раннера.
+          if [ ! -s expected_names.txt ]; then
+            echo "expected_names.txt is missing; not touching the release"; exit 0
+          fi
+          want_names=$(LC_ALL=C sort expected_names.txt | paste -sd, -)
+          # shellcheck source=.github/scripts/release-state.sh
+          source .github/scripts/release-state.sh
+          state=$(release_state)
+          case "${state}" in
+            "missing"|"error") echo "nothing to clean up (${state})";;
+            "ok false 24 ${want_names}") echo "complete release left in place";;
+            *) echo "removing leftover draft/partial release (${state})"
+               gh release delete "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --yes || true;;
+          esac
