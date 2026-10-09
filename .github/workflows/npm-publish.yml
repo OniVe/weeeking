@@ -56,19 +56,32 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') && steps.registry.outputs.already == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
+        working-directory: npm
         run: |
-          for attempt in $(seq 1 60); do
-            assets=$(gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets[].name' 2>/dev/null || true)
+          version=$(node -p "require('./package.json').version")
+          raws=(
+            "weeeking-${version}-win-x64.exe"
+            "weeeking-${version}-linux-x64"
+            "weeeking-${version}-linux-musl-x64"
+            "weeeking-${version}-linux-arm64"
+            "weeeking-${version}-osx-arm64"
+            "weeeking-${version}-osx-x64"
+          )
+          for attempt in $(seq 1 240); do
+            draft=$(gh release view "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft' 2>/dev/null || echo true)
+            assets=$(gh release view "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name' 2>/dev/null || true)
             ready=true
-            for name in weeeking-win32-x64.exe weeeking-win32-x64.exe.sha256 weeeking-linux-x64 weeeking-linux-x64.sha256; do
-              if ! grep -qx "${name}" <<<"${assets}"; then
-                ready=false
-              fi
+            for raw in "${raws[@]}"; do
+              for name in "${raw}" "${raw}.sha256"; do
+                if ! grep -qx "${name}" <<<"${assets}"; then
+                  ready=false
+                fi
+              done
             done
-            if [ "${ready}" = true ]; then
-              echo "release assets ready"; exit 0
+            if [ "${ready}" = true ] && [ "${draft}" = "false" ]; then
+              echo "release is published with all assets"; exit 0
             fi
-            echo "waiting for release assets (attempt ${attempt}/60)"
+            echo "waiting for release assets (attempt ${attempt}/240)"
             sleep 10
           done
           echo "release assets did not appear in time"; exit 1

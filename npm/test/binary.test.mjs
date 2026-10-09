@@ -11,6 +11,7 @@ const binary = (
   await import(pathToFileURL(path.join(here, "..", "lib", "binary.js")))
 ).default;
 const vendorDir = path.resolve(here, "..", "vendor");
+const version = binary.releaseTag().slice(1);
 
 let savedBinaryEnv;
 
@@ -53,34 +54,62 @@ after(async () => {
   await fsp.rm(vendorDir, { recursive: true, force: true });
 });
 
-test("maps supported platforms only", () => {
-  assert.equal(binary.targetKey("win32", "x64"), "win32-x64");
-  assert.equal(binary.targetKey("linux", "x64"), "linux-x64");
-  assert.equal(binary.targetKey("darwin", "arm64"), null);
-  assert.equal(binary.targetKey("linux", "arm64"), null);
+test("resolves supported platforms and asset names", () => {
+  assert.equal(
+    binary.resolveTarget({ platform: "win32", arch: "x64" }).asset(version),
+    `weeeking-${version}-win-x64.exe`,
+  );
+  assert.equal(
+    binary.resolveTarget({ platform: "linux", arch: "x64", libc: "gnu" }).asset(version),
+    `weeeking-${version}-linux-x64`,
+  );
+  assert.equal(
+    binary.resolveTarget({ platform: "linux", arch: "x64", libc: "musl" }).asset(version),
+    `weeeking-${version}-linux-musl-x64`,
+  );
+  assert.equal(
+    binary.resolveTarget({ platform: "linux", arch: "arm64", libc: "gnu" }).asset(version),
+    `weeeking-${version}-linux-arm64`,
+  );
+  assert.equal(
+    binary.resolveTarget({ platform: "darwin", arch: "arm64" }).asset(version),
+    `weeeking-${version}-osx-arm64`,
+  );
+  assert.equal(
+    binary.resolveTarget({ platform: "darwin", arch: "x64" }).asset(version),
+    `weeeking-${version}-osx-x64`,
+  );
+  assert.equal(binary.resolveTarget({ platform: "freebsd", arch: "x64" }), null);
+  assert.equal(binary.resolveTarget({ platform: "linux", arch: "ia32" }), null);
+});
+
+test("detects the libc flavor", () => {
+  assert.equal(binary.detectLibc({ header: { glibcVersionRuntime: "2.39" } }), "gnu");
+  assert.equal(binary.detectLibc({ header: {} }), "musl");
+  assert.equal(binary.detectLibc(null), "musl");
 });
 
 test("parses sha256 files", () => {
   const hash = "a".repeat(64);
-  assert.equal(binary.parseChecksum(`${hash}  weeeking-linux-x64\n`), hash);
+  assert.equal(binary.parseChecksum(`${hash}  weeeking-${version}-linux-x64\n`), hash);
   assert.equal(binary.parseChecksum(`${hash.toUpperCase()} *file`), hash);
   assert.throws(() => binary.parseChecksum("no hash here"), /контрольной суммы/);
 });
 
 test("downloads and verifies the binary for the current platform", async () => {
-  const key = binary.targetKey();
-  assert.ok(key, "тестовое окружение должно быть win32-x64 или linux-x64");
-  const target = binary.TARGETS[key];
+  const target = binary.resolveTarget();
+  assert.ok(target, "тестовое окружение должно быть одной из поддерживаемых платформ");
+  const assetName = target.asset(version);
   const payload = crypto.randomBytes(2048);
   const checksum = crypto.createHash("sha256").update(payload).digest("hex");
   const server = await startServer({
-    [`/${target.asset}`]: { body: payload },
-    [`/${target.asset}.sha256`]: { body: `${checksum}  ${target.asset}\n` },
+    [`/${assetName}`]: { body: payload },
+    [`/${assetName}.sha256`]: { body: `${checksum}  ${assetName}\n` },
   });
   process.env.WEEEKING_DOWNLOAD_BASE = server.url;
   try {
     const location = await binary.ensureBinary();
-    assert.equal(location, path.join(vendorDir, target.binary));
+    assert.equal(location, path.join(vendorDir, target.key, target.binary));
     assert.deepEqual(await fsp.readFile(location), payload);
     if (process.platform !== "win32") {
       assert.notEqual((await fsp.stat(location)).mode & 0o111, 0, "бинарник должен быть исполняемым");
@@ -92,13 +121,13 @@ test("downloads and verifies the binary for the current platform", async () => {
 });
 
 test("trusts a verified local copy and heals a corrupted one", async () => {
-  const key = binary.targetKey();
-  const target = binary.TARGETS[key];
+  const target = binary.resolveTarget();
+  const assetName = target.asset(version);
   const payload = crypto.randomBytes(2048);
   const checksum = crypto.createHash("sha256").update(payload).digest("hex");
   const server = await startServer({
-    [`/${target.asset}`]: { body: payload },
-    [`/${target.asset}.sha256`]: { body: `${checksum}  ${target.asset}\n` },
+    [`/${assetName}`]: { body: payload },
+    [`/${assetName}.sha256`]: { body: `${checksum}  ${assetName}\n` },
   });
   process.env.WEEEKING_DOWNLOAD_BASE = server.url;
   try {
@@ -119,14 +148,14 @@ test("trusts a verified local copy and heals a corrupted one", async () => {
 });
 
 test("fails closed on checksum mismatch", async () => {
-  const key = binary.targetKey();
-  const target = binary.TARGETS[key];
+  const target = binary.resolveTarget();
+  const assetName = target.asset(version);
   const payload = crypto.randomBytes(256);
   const wrong = crypto.randomBytes(256);
   const server = await startServer({
-    [`/${target.asset}`]: { body: payload },
-    [`/${target.asset}.sha256`]: {
-      body: `${crypto.createHash("sha256").update(wrong).digest("hex")}  ${target.asset}\n`,
+    [`/${assetName}`]: { body: payload },
+    [`/${assetName}.sha256`]: {
+      body: `${crypto.createHash("sha256").update(wrong).digest("hex")}  ${assetName}\n`,
     },
   });
   process.env.WEEEKING_DOWNLOAD_BASE = server.url;
@@ -147,4 +176,12 @@ test("reports missing release assets", async () => {
     delete process.env.WEEEKING_DOWNLOAD_BASE;
     await server.close();
   }
+});
+
+test("reports unsupported platforms", async () => {
+  const error = await binary
+    .ensureBinary({ platform: "freebsd", arch: "x64" })
+    .then(() => null, (problem) => problem);
+  assert.ok(error, "ожидалась ошибка для неподдерживаемой платформы");
+  assert.match(error.message, /не поддерживается/);
 });

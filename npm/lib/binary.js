@@ -11,19 +11,56 @@ const PACKAGE = require("../package.json");
 /** GitHub repo that hosts the release assets. */
 const REPO = "OniVe/weeeking";
 
-/** Supported targets: node's `${platform}-${arch}` -> release asset and local binary name. */
-const TARGETS = {
-  "win32-x64": { asset: "weeeking-win32-x64.exe", binary: "weeeking.exe" },
-  "linux-x64": { asset: "weeeking-linux-x64", binary: "weeeking" },
-};
-
 const DOWNLOAD_TIMEOUT_MS = 120_000;
 const CHECKSUM_TIMEOUT_MS = 30_000;
 const ATTEMPTS = 3;
 
-function targetKey(platform = process.platform, arch = process.arch) {
+const SUPPORTED = "Windows x64, Linux x64 (gnu/musl), Linux arm64, macOS arm64/x64";
+
+/** Linux x64 поставляется в двух вариантах libc; остальные — по platform-arch. */
+function detectLibc(report) {
+  let value = report;
+  if (value === undefined) {
+    value = process.report && typeof process.report.getReport === "function"
+      ? process.report.getReport()
+      : null;
+  }
+  const header = value && value.header ? value.header : {};
+  return header.glibcVersionRuntime ? "gnu" : "musl";
+}
+
+/**
+ * Цель загрузки для платформы: `{ key, asset(version), binary }`
+ * или `null` для неподдерживаемой платформы.
+ */
+function resolveTarget({ platform = process.platform, arch = process.arch, libc } = {}) {
   const key = `${platform}-${arch}`;
-  return Object.hasOwn(TARGETS, key) ? key : null;
+  switch (key) {
+    case "win32-x64":
+      return { key, asset: (version) => `weeeking-${version}-win-x64.exe`, binary: "weeeking.exe" };
+    case "linux-x64": {
+      const flavor = libc === undefined ? detectLibc() : libc;
+      return flavor === "musl"
+        ? {
+            key: "linux-musl-x64",
+            asset: (version) => `weeeking-${version}-linux-musl-x64`,
+            binary: "weeeking",
+          }
+        : {
+            key: "linux-x64",
+            asset: (version) => `weeeking-${version}-linux-x64`,
+            binary: "weeeking",
+          };
+    }
+    case "linux-arm64":
+      return { key, asset: (version) => `weeeking-${version}-linux-arm64`, binary: "weeeking" };
+    case "darwin-arm64":
+      return { key: "osx-arm64", asset: (version) => `weeeking-${version}-osx-arm64`, binary: "weeeking" };
+    case "darwin-x64":
+      return { key: "osx-x64", asset: (version) => `weeeking-${version}-osx-x64`, binary: "weeeking" };
+    default:
+      return null;
+  }
 }
 
 function releaseTag() {
@@ -102,7 +139,8 @@ function sha256(buffer) {
 }
 
 async function downloadBinary(target, destination, log) {
-  const assetUrl = `${downloadBaseUrl()}/${target.asset}`;
+  const assetName = target.asset(PACKAGE.version);
+  const assetUrl = `${downloadBaseUrl()}/${assetName}`;
   log(`скачиваю ${assetUrl}`);
   const checksum = parseChecksum(
     (await fetchChecked(`${assetUrl}.sha256`, CHECKSUM_TIMEOUT_MS)).toString("utf8"),
@@ -111,7 +149,7 @@ async function downloadBinary(target, destination, log) {
   const actual = sha256(payload);
   if (actual !== checksum) {
     throw new Error(
-      `sha256 не совпал для ${target.asset}: ожидался ${checksum}, получен ${actual}`,
+      `sha256 не совпал для ${assetName}: ожидался ${checksum}, получен ${actual}`,
     );
   }
   await fsp.mkdir(path.dirname(destination), { recursive: true });
@@ -148,23 +186,25 @@ async function writableDestination(vendor, cache) {
  * Resolves the native weeeking binary for the current platform.
  *
  * Order: `WEEEKING_BINARY` override -> `vendor/` inside the package ->
- * `~/.weeeking/<version>/` cache; downloads with sha256 verification on first use.
+ * `~/.weeeking/<version>/<key>/` cache; downloads with sha256 verification on first use.
+ * Тесты могут подменить платформу (`platform`/`arch`/`libc`) без изменения окружения.
  */
-async function ensureBinary({ log = () => {} } = {}) {
+async function ensureBinary({ log = () => {}, platform, arch, libc } = {}) {
   const override = process.env.WEEEKING_BINARY;
   if (override) {
     return override;
   }
-  const key = targetKey();
-  if (!key) {
+  const target = resolveTarget({ platform, arch, libc });
+  if (!target) {
+    const shownPlatform = platform ?? process.platform;
+    const shownArch = arch ?? process.arch;
     throw new Error(
-      `платформа ${process.platform}-${process.arch} не поддерживается (доступны Windows x64 и Linux x64); ` +
+      `платформа ${shownPlatform}-${shownArch} не поддерживается (доступны: ${SUPPORTED}); ` +
         "задайте WEEEKING_BINARY, чтобы использовать свой бинарник",
     );
   }
-  const target = TARGETS[key];
-  const vendor = path.join(packageRoot(), "vendor", target.binary);
-  const cache = path.join(os.homedir(), ".weeeking", PACKAGE.version, target.binary);
+  const vendor = path.join(packageRoot(), "vendor", target.key, target.binary);
+  const cache = path.join(os.homedir(), ".weeeking", PACKAGE.version, target.key, target.binary);
   for (const candidate of [vendor, cache]) {
     if (await isVerifiedFile(candidate)) {
       return candidate;
@@ -175,9 +215,9 @@ async function ensureBinary({ log = () => {} } = {}) {
 }
 
 module.exports = {
-  TARGETS,
   ensureBinary,
-  targetKey,
+  resolveTarget,
+  detectLibc,
   parseChecksum,
   releaseTag,
   downloadBaseUrl,

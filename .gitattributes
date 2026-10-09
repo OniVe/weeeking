@@ -1,0 +1,18 @@
+# Единые переводы строк: LF и в репозитории, и в рабочем дереве.
+# CI-проверка «Check line endings (LF)» опирается на эти атрибуты.
+* text=auto eol=lf
+
+# Windows-скрипты (если появятся): этим форматам нужен CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Сгенерированное: вне статистики языков и свёрнуто в диффах
+src/spec_generated.rs linguist-generated=true
+Cargo.lock linguist-generated=true
+
+# git archive: служебные файлы не нужны в экспортных архивах
+/.github export-ignore
+/tools export-ignore
+/tests export-ignore
+/.gitattributes export-ignore
+/.gitignore export-ignore

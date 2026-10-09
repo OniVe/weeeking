@@ -5,6 +5,7 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -23,6 +24,15 @@ jobs:
     steps:
       # actions/checkout@v7.0.1 (запиннено по SHA)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # LF-инвариант: ни в индексе, ни в рабочем дереве нет CRLF/mixed
+      # (*.bat/*.cmd разрешены атрибутами в .gitattributes).
+      - name: Check line endings (LF)
+        shell: bash
+        run: |
+          bad=$(git ls-files --eol | grep -E '(i|w)/(crlf|mixed)' | grep -vE '\.(bat|cmd)$' || true)
+          if [ -n "$bad" ]; then
+            echo "CRLF/mixed files found:"; echo "$bad"; exit 1
+          fi
       # Rust stable ставим сами через rustup (он есть на GitHub-hosted образах):
       # сторонняя action не нужна — нечему устаревать и нечего исключать из Dependabot.
       # Микро-ретраи: rustup ходит на сервер релизов, транзиентные сбои загрузки бывают.
@@ -68,28 +78,42 @@ jobs:
         working-directory: npm
         run: node --test
 
-  release:
-    name: release (${{ matrix.target }})
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: test
-    permissions:
-      contents: write
+  # Проверочная сборка всех релизных платформ на main (+ dispatch не по тегу):
+  # поломки платформ должны ловиться до тега, а не на релизе. PR не гоняем — экономим время.
+  build-matrix:
+    name: build (${{ matrix.key }})
+    if: >-
+      (github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/v'))
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
+          - runner: windows-latest
             target: x86_64-pc-windows-msvc
-            archive: weeeking-x86_64-pc-windows-msvc.zip
-            raw: weeeking-win32-x64.exe
-            raw_sha: weeeking-win32-x64.exe.sha256
-          - os: ubuntu-latest
+            key: win-x64
+          - runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            archive: weeeking-x86_64-unknown-linux-gnu.tar.gz
-            raw: weeeking-linux-x64
-            raw_sha: weeeking-linux-x64.sha256
-    runs-on: ${{ matrix.os }}
+            key: linux-x64
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            key: linux-musl-x64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            key: linux-arm64
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            key: osx-arm64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            key: osx-x64
+    runs-on: ${{ matrix.runner }}
+    env:
+      TARGET: ${{ matrix.target }}
+      CC_x86_64_unknown_linux_musl: musl-gcc
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
     steps:
+      # actions/checkout@v7.0.1 (запиннено по SHA)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install Rust (stable)
         shell: bash
@@ -108,7 +132,97 @@ jobs:
             attempt=$((attempt + 1))
           done
           rustup default stable
+      - name: Install target and musl toolchain
+        shell: bash
+        run: |
+          rustup target add "${TARGET}"
+          if [ "${TARGET}" = "x86_64-unknown-linux-musl" ]; then
+            sudo apt-get update
+            sudo apt-get install -y musl-tools
+          fi
+      # Swatinem/rust-cache@v2 (запиннено по SHA)
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          key: ${{ matrix.key }}
+      - name: Build release
+        run: cargo build --release --locked --target "${TARGET}"
+      - name: Smoke (--help)
+        shell: bash
+        run: |
+          bin="target/${TARGET}/release/weeeking"
+          if [ -f "${bin}.exe" ]; then bin="${bin}.exe"; fi
+          "${bin}" --help > /dev/null
+      - name: Smoke in Alpine container (musl)
+        if: matrix.key == 'linux-musl-x64'
+        shell: bash
+        run: |
+          docker run --rm -v "${GITHUB_WORKSPACE}/target/${TARGET}/release:/m:ro" alpine:3.20 /m/weeeking --help > /dev/null
+
+  release:
+    name: release (${{ matrix.key }})
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            key: win-x64
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            key: linux-x64
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            key: linux-musl-x64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            key: linux-arm64
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            key: osx-arm64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            key: osx-x64
+    runs-on: ${{ matrix.runner }}
+    env:
+      TARGET: ${{ matrix.target }}
+      CC_x86_64_unknown_linux_musl: musl-gcc
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+    steps:
+      # actions/checkout@v7.0.1 (запиннено по SHA)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install Rust (stable)
+        shell: bash
+        run: |
+          command -v rustup >/dev/null || { echo "rustup not found on this runner"; exit 1; }
+          attempt=1
+          while true; do
+            if rustup toolchain install stable --profile minimal --no-self-update; then
+              break
+            fi
+            if [ "$attempt" -ge 3 ]; then
+              echo "rustup install failed after 3 attempts"; exit 1
+            fi
+            echo "rustup install failed (attempt $attempt); retry in 20s"
+            sleep 20
+            attempt=$((attempt + 1))
+          done
+          rustup default stable
+      - name: Install target and musl toolchain
+        shell: bash
+        run: |
+          rustup target add "${TARGET}"
+          if [ "${TARGET}" = "x86_64-unknown-linux-musl" ]; then
+            sudo apt-get update
+            sudo apt-get install -y musl-tools
+          fi
+      # Swatinem/rust-cache@v2 (запиннено по SHA)
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+        with:
+          key: ${{ matrix.key }}
       - name: Check release preconditions
         shell: bash
         run: |
@@ -119,33 +233,110 @@ jobs:
           if [ ! -s .github/release-body.md ]; then
             echo ".github/release-body.md is missing or empty"; exit 1
           fi
-      - run: cargo build --release --locked
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+      - name: Build release
+        run: cargo build --release --locked --target "${TARGET}"
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Compress-Archive -Path target/release/weeeking.exe -DestinationPath ${{ matrix.archive }}
-          $hash = (Get-FileHash ${{ matrix.archive }} -Algorithm SHA256).Hash.ToLower()
-          [IO.File]::WriteAllText("${{ matrix.archive }}.sha256", "$hash  ${{ matrix.archive }}`n")
-          # Сырой бинарник для npm-обёртки (скачивается без распаковки архивов).
-          Copy-Item target/release/weeeking.exe ${{ matrix.raw }}
-          $raw = (Get-FileHash ${{ matrix.raw }} -Algorithm SHA256).Hash.ToLower()
-          [IO.File]::WriteAllText("${{ matrix.raw_sha }}", "$raw  ${{ matrix.raw }}`n")
-      - name: Package (Linux)
-        if: runner.os == 'Linux'
+          $version = $env:VERSION
+          $archive = "weeeking-$version-${{ matrix.key }}.zip"
+          $raw = "weeeking-$version-${{ matrix.key }}.exe"
+          $bin = "target/${{ matrix.target }}/release/weeeking.exe"
+          Compress-Archive -Path $bin -DestinationPath $archive
+          $hash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLower()
+          [IO.File]::WriteAllText("$archive.sha256", "$hash  $archive`n")
+          Copy-Item $bin $raw
+          $rawHash = (Get-FileHash $raw -Algorithm SHA256).Hash.ToLower()
+          [IO.File]::WriteAllText("$raw.sha256", "$rawHash  $raw`n")
+          Add-Content -Path $env:GITHUB_ENV -Value "ARCHIVE=$archive"
+          Add-Content -Path $env:GITHUB_ENV -Value "RAW=$raw"
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
-          tar -czf ${{ matrix.archive }} -C target/release weeeking
-          sha256sum ${{ matrix.archive }} > ${{ matrix.archive }}.sha256
-          # Сырой бинарник для npm-обёртки (скачивается без распаковки архивов).
-          cp target/release/weeeking ${{ matrix.raw }}
-          chmod +x ${{ matrix.raw }}
-          sha256sum ${{ matrix.raw }} > ${{ matrix.raw_sha }}
+          archive="weeeking-${VERSION}-${{ matrix.key }}.tar.gz"
+          raw="weeeking-${VERSION}-${{ matrix.key }}"
+          tar -czf "${archive}" -C "target/${{ matrix.target }}/release" weeeking
+          sha256_file() {
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "$1" > "$1.sha256"
+            else
+              shasum -a 256 "$1" > "$1.sha256"
+            fi
+          }
+          sha256_file "${archive}"
+          cp "target/${{ matrix.target }}/release/weeeking" "${raw}"
+          chmod +x "${raw}"
+          sha256_file "${raw}"
+          {
+            echo "ARCHIVE=${archive}"
+            echo "RAW=${raw}"
+          } >> "$GITHUB_ENV"
+      - name: Collect release files
+        id: files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${ARCHIVE:-}" ] || [ -z "${RAW:-}" ]; then
+            echo "ARCHIVE/RAW are not set"; exit 1
+          fi
+          {
+            echo "list<<EOF"
+            echo "${ARCHIVE}"
+            echo "${ARCHIVE}.sha256"
+            echo "${RAW}"
+            echo "${RAW}.sha256"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       # softprops/action-gh-release@v3.0.3 (запиннено по SHA)
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64
         with:
+          name: ${{ github.ref_name }} Release of Weeeking
+          # Черновик: публикуем релиз только после полного набора ассетов и секции хэшей
+          # (снимает draft job release-notes).
+          draft: true
           body_path: .github/release-body.md
-          files: |
-            ${{ matrix.archive }}
-            ${{ matrix.archive }}.sha256
-            ${{ matrix.raw }}
-            ${{ matrix.raw_sha }}
+          files: ${{ steps.files.outputs.list }}
+
+  # После сборки всех платформ дописывает в тело релиза секцию SHA256
+  # (как у PowerShell). Тело детерминированно: release-body.md + сгенерированная секция,
+  # поэтому повторный полный прогон не даёт дублей.
+  release-notes:
+    name: release notes (hashes)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # actions/checkout@v7.0.1 (запиннено по SHA)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Append SHA256 hashes to the release body
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist && mkdir dist
+          gh release download "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" -D dist
+          {
+            echo
+            echo "### SHA256 Hashes of the release artifacts"
+            echo
+            for f in $(cd dist && ls -1 | sort); do
+              case "$f" in *.sha256) continue;; esac
+              echo "- \`$f\` — \`$(sha256sum "dist/$f" | cut -d' ' -f1)\`"
+            done
+            echo
+            echo "Суммы продублированы в файлах \`.sha256\` рядом с каждым артефактом."
+          } > hashes.md
+          cat .github/release-body.md hashes.md > body.md
+          gh release edit "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --notes-file body.md
+      - name: Publish the release (clear draft)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release edit "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --draft=false

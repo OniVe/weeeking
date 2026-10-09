@@ -40,13 +40,23 @@ cargo build --release
 
 ## Релизы
 
-Готовые бинарники — в [GitHub Releases](https://github.com/OniVe/weeeking/releases):
-`weeeking-x86_64-pc-windows-msvc.zip` и `weeeking-x86_64-unknown-linux-gnu.tar.gz`, рядом контрольные суммы `.sha256`.
+Готовые бинарники — в [GitHub Releases](https://github.com/OniVe/weeeking/releases): архивы
+`weeeking-<версия>-<платформа>` и сырые бинарники для npm-обёртки; рядом — файлы `.sha256`,
+хэши также перечислены в описании релиза.
+
+| Платформа | Архив | Сырой бинарник |
+| --- | --- | --- |
+| Windows x64 | `weeeking-<версия>-win-x64.zip` | `weeeking-<версия>-win-x64.exe` |
+| Linux x64 (glibc) | `weeeking-<версия>-linux-x64.tar.gz` | `weeeking-<версия>-linux-x64` |
+| Linux x64 (musl, static) | `weeeking-<версия>-linux-musl-x64.tar.gz` | `weeeking-<версия>-linux-musl-x64` |
+| Linux arm64 | `weeeking-<версия>-linux-arm64.tar.gz` | `weeeking-<версия>-linux-arm64` |
+| macOS arm64 | `weeeking-<версия>-osx-arm64.tar.gz` | `weeeking-<версия>-osx-arm64` |
+| macOS x64 | `weeeking-<версия>-osx-x64.tar.gz` | `weeeking-<версия>-osx-x64` |
 
 ```bash
 # проверка контрольной суммы
-certutil -hashfile weeeking-x86_64-pc-windows-msvc.zip SHA256   # Windows
-sha256sum -c weeeking-x86_64-unknown-linux-gnu.tar.gz.sha256     # Linux
+certutil -hashfile weeeking-<версия>-win-x64.zip SHA256          # Windows
+sha256sum -c weeeking-<версия>-linux-x64.tar.gz.sha256           # Linux
 ```
 
 ### npm (npx)
@@ -55,8 +65,12 @@ sha256sum -c weeeking-x86_64-unknown-linux-gnu.tar.gz.sha256     # Linux
 npx -y weeeking     # MCP-сервер по stdio; бинарник скачается и проверится по sha256
 ```
 
-Пакет `weeeking` — тонкая обёртка: берёт нативный бинарник нужной платформы (Windows x64 / Linux x64)
-из GitHub Releases этой же версии. Публикуется через npm trusted publishing (OIDC, с provenance).
+Пакет `weeeking` — тонкая обёртка: берёт нативный бинарник нужной платформы (Windows x64,
+Linux x64 gnu/musl, Linux arm64, macOS arm64/x64) из GitHub Releases этой же версии. Публикуется
+через npm trusted publishing (OIDC, с provenance).
+
+На macOS скачанный через браузер бинарник может ловить карантин Gatekeeper — снимите его
+(`xattr -d com.apple.quarantine <файл>`) или ставьте через `npx`/`curl`.
 
 ## Переменные окружения
 
