@@ -28,6 +28,3 @@ tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros", "io-std",
 
 [target."cfg(windows)".dependencies]
 keyring = "4.2.0"
-
-[dev-dependencies]
-tiny_http = "0.12.0"

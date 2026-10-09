@@ -6,11 +6,11 @@ mod common;
 use common::{McpClient, result_text};
 use serde_json::{Value, json};
 use std::collections::VecDeque;
-use std::io::Cursor;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-use tiny_http::{Header, ListenAddr, Response, Server, StatusCode};
 
 struct Canned {
     status: u16,
@@ -63,69 +63,24 @@ struct MockServer {
 
 impl MockServer {
     fn start(script: Vec<Canned>) -> Self {
-        let server = Server::http("127.0.0.1:0").expect("mock server");
-        let addr = match server.server_addr() {
-            ListenAddr::IP(socket) => format!("http://{socket}"),
-            #[allow(unreachable_patterns)]
-            _ => panic!("ожидается TCP-адрес"),
-        };
+        let listener = TcpListener::bind("127.0.0.1:0").expect("mock listener");
+        let addr = format!("http://{}", listener.local_addr().expect("mock addr"));
         let requests = Arc::new(Mutex::new(Vec::new()));
         let queue: Arc<Mutex<VecDeque<Canned>>> = Arc::new(Mutex::new(script.into()));
-        let requests_thread = requests.clone();
-        let queue_thread = queue.clone();
-        thread::spawn(move || {
-            for request in server.incoming_requests() {
-                requests_thread
-                    .lock()
-                    .unwrap()
-                    .push((request.method().to_string(), request.url().to_string()));
-                let canned = queue_thread.lock().unwrap().pop_front();
-                match canned {
-                    Some(item) => {
-                        if item.delay_ms > 0 {
-                            thread::sleep(Duration::from_millis(item.delay_ms));
-                        }
-                        // Закрываем соединение после каждого ответа: иначе reqwest
-                        // переиспользует keep-alive из пула, а однопоточный tiny_http
-                        // под параллельными запросами (tokio::join!) может подвесить
-                        // один из них до клиентского таймаута.
-                        let mut headers = vec![
-                            Header::from_bytes(&b"Content-Type"[..], item.content_type.as_bytes())
-                                .unwrap(),
-                            Header::from_bytes(&b"Connection"[..], &b"close"[..]).unwrap(),
-                        ];
-                        if let Some(disposition) = &item.disposition {
-                            headers.push(
-                                Header::from_bytes(
-                                    &b"Content-Disposition"[..],
-                                    disposition.as_bytes(),
-                                )
-                                .unwrap(),
-                            );
-                        }
-                        if let Some(retry_after) = &item.retry_after {
-                            headers.push(
-                                Header::from_bytes(&b"Retry-After"[..], retry_after.as_bytes())
-                                    .unwrap(),
-                            );
-                        }
-                        let data = Cursor::new(item.body.clone());
-                        let length = if item.chunked {
-                            None
-                        } else {
-                            Some(item.body.len())
-                        };
-                        let response =
-                            Response::new(StatusCode(item.status), headers, data, length, None);
-                        let _ = request.respond(response);
-                    }
-                    None => {
-                        let _ = request
-                            .respond(Response::from_string("no script").with_status_code(500));
-                    }
+        {
+            let requests = requests.clone();
+            let queue = queue.clone();
+            thread::spawn(move || {
+                for incoming in listener.incoming() {
+                    let Ok(stream) = incoming else { continue };
+                    let requests = requests.clone();
+                    let queue = queue.clone();
+                    // Поток на соединение: параллельные запросы (tokio::join!)
+                    // обслуживаются независимо — без общих пулов и без keep-alive.
+                    thread::spawn(move || handle_connection(stream, requests, queue));
                 }
-            }
-        });
+            });
+        }
         Self { addr, requests }
     }
 
@@ -140,6 +95,119 @@ impl MockServer {
         ];
         env.extend_from_slice(extra_env);
         McpClient::start(&env)
+    }
+}
+
+/// Обслуживает одно соединение: читает запрос, отдаёт следующий сценарный ответ.
+fn handle_connection(
+    mut stream: TcpStream,
+    requests: Arc<Mutex<Vec<(String, String)>>>,
+    queue: Arc<Mutex<VecDeque<Canned>>>,
+) {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_nodelay(true);
+    let Ok(reader_stream) = stream.try_clone() else {
+        return;
+    };
+    let mut reader = BufReader::new(reader_stream);
+
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line).is_err() || request_line.trim().is_empty() {
+        return;
+    }
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or_default().to_string();
+    let url = parts.next().unwrap_or_default().to_string();
+
+    let mut content_length = 0usize;
+    loop {
+        let mut header = String::new();
+        if reader.read_line(&mut header).is_err() {
+            return;
+        }
+        let header = header.trim_end();
+        if header.is_empty() {
+            break;
+        }
+        let lower = header.to_ascii_lowercase();
+        if let Some(value) = lower.strip_prefix("content-length:") {
+            content_length = value.trim().parse().unwrap_or(0);
+        }
+    }
+    if content_length > 0 {
+        let mut body = vec![0u8; content_length];
+        if reader.read_exact(&mut body).is_err() {
+            return;
+        }
+    }
+
+    requests.lock().unwrap().push((method, url));
+
+    let canned = queue.lock().unwrap().pop_front();
+    let Some(item) = canned else {
+        let _ = write_response(
+            &mut stream,
+            500,
+            "text/plain",
+            b"no script",
+            None,
+            None,
+            false,
+        );
+        return;
+    };
+    if item.delay_ms > 0 {
+        thread::sleep(Duration::from_millis(item.delay_ms));
+    }
+    let _ = write_response(
+        &mut stream,
+        item.status,
+        item.content_type,
+        &item.body,
+        item.disposition.as_deref(),
+        item.retry_after.as_deref(),
+        item.chunked,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_response(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    body: &[u8],
+    disposition: Option<&str>,
+    retry_after: Option<&str>,
+    chunked: bool,
+) -> std::io::Result<()> {
+    let mut head = format!("HTTP/1.1 {status} {}\r\n", reason_phrase(status));
+    head.push_str(&format!("Content-Type: {content_type}\r\n"));
+    if let Some(disposition) = disposition {
+        head.push_str(&format!("Content-Disposition: {disposition}\r\n"));
+    }
+    if let Some(retry_after) = retry_after {
+        head.push_str(&format!("Retry-After: {retry_after}\r\n"));
+    }
+    if !chunked {
+        head.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    }
+    head.push_str("Connection: close\r\n\r\n");
+    stream.write_all(head.as_bytes())?;
+    stream.write_all(body)?;
+    stream.flush()
+}
+
+fn reason_phrase(status: u16) -> &'static str {
+    match status {
+        200 => "OK",
+        401 => "Unauthorized",
+        404 => "Not Found",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        502 => "Bad Gateway",
+        503 => "Service Unavailable",
+        504 => "Gateway Timeout",
+        _ => "Status",
     }
 }
 
