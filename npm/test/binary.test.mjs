@@ -60,6 +60,12 @@ test("resolves supported platforms and asset names", () => {
     `weeeking-${version}-win-x64.exe`,
   );
   assert.equal(
+    binary.resolveTarget({ platform: "win32", arch: "arm64" }).asset(version),
+    `weeeking-${version}-win-arm64.exe`,
+  );
+  assert.equal(binary.resolveTarget({ platform: "win32", arch: "arm64" }).binary, "weeeking.exe");
+  assert.equal(binary.resolveTarget({ platform: "win32", arch: "arm64" }).key, "win32-arm64");
+  assert.equal(
     binary.resolveTarget({ platform: "linux", arch: "x64", libc: "gnu" }).asset(version),
     `weeeking-${version}-linux-x64`,
   );

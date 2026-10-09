@@ -92,6 +92,9 @@ jobs:
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             key: win-x64
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            key: win-arm64
           - runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             key: linux-x64
@@ -170,6 +173,9 @@ jobs:
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             key: win-x64
+          - runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            key: win-arm64
           - runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             key: linux-x64
@@ -231,6 +237,9 @@ jobs:
           fi
           if [ ! -s .github/release-body.md ]; then
             echo ".github/release-body.md is missing or empty"; exit 1
+          fi
+          if ! grep -qF "[${version}]" .github/release-body.md; then
+            echo ".github/release-body.md does not mention [${version}]"; exit 1
           fi
           echo "VERSION=${version}" >> "$GITHUB_ENV"
       - name: Build release
@@ -299,10 +308,11 @@ jobs:
           if-no-files-found: error
 
   # Публикация «всё или ничего»: леги выше ничего не пишут в GitHub Releases — они собирают
-  # файлы и отдают их workflow-артефактами. Один job скачивает полный набор, проверяет состав
-  # (24 файла) и sha256, затем создаёт ЧЕРНОВИК, заливает в него все ассеты и публикует его
-  # отдельным действием: публично релиз появляется только целиком. При сбое недосозданный
-  # черновик удаляется (плюс страховочный шаг if: always()), конкурентные прогоны сериализуются.
+  # файлы и отдают их workflow-артефактами. Один job скачивает полный набор и проверяет состав
+  # и sha256; если релиз уже полон — чистый no-op, иначе создаёт ЧЕРНОВИК, подписывает файлы
+  # GitHub-аттестациями (Sigstore), заливает в него все ассеты и публикует его отдельным
+  # действием: публично релиз появляется только целиком. При сбое недосозданный черновик
+  # удаляется (плюс страховочный шаг if: always()), конкурентные прогоны сериализуются.
   publish-release:
     name: publish release
     if: startsWith(github.ref, 'refs/tags/v')
@@ -310,6 +320,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write # OIDC для GitHub-аттестаций (Sigstore)
+      attestations: write # запись аттестаций в GitHub
     concurrency:
       group: publish-release-${{ github.ref }}
       cancel-in-progress: false
@@ -341,6 +353,10 @@ jobs:
           add "weeeking-${version}-win-x64.zip.sha256"
           add "weeeking-${version}-win-x64.exe"
           add "weeeking-${version}-win-x64.exe.sha256"
+          add "weeeking-${version}-win-arm64.zip"
+          add "weeeking-${version}-win-arm64.zip.sha256"
+          add "weeeking-${version}-win-arm64.exe"
+          add "weeeking-${version}-win-arm64.exe.sha256"
           for key in linux-x64 linux-musl-x64 linux-arm64 osx-arm64 osx-x64; do
             add "weeeking-${version}-${key}.tar.gz"
             add "weeeking-${version}-${key}.tar.gz.sha256"
@@ -351,8 +367,9 @@ jobs:
           for name in ${expected}; do
             if [ ! -f "dist/${name}" ]; then echo "missing asset: ${name}"; failed=1; fi
           done
+          expected_count=$(printf '%s' "${expected}" | grep -c .)
           count=$(find dist -maxdepth 1 -type f | wc -l)
-          if [ "${count}" -ne 24 ]; then echo "expected 24 files, got ${count}"; failed=1; fi
+          if [ "${count}" -ne "${expected_count}" ]; then echo "expected ${expected_count} files, got ${count}"; failed=1; fi
           if [ "${failed}" -ne 0 ]; then echo "asset verification failed"; exit 1; fi
           for f in dist/*; do
             case "$f" in *.sha256) continue;; esac
@@ -362,7 +379,7 @@ jobs:
           done
           if [ "${failed}" -ne 0 ]; then echo "asset verification failed"; exit 1; fi
           printf '%s' "${expected}" > expected_names.txt
-          echo "all 24 assets verified"
+          echo "all ${expected_count} assets verified"
       - name: Build the release body (description + SHA256 section)
         shell: bash
         run: |
@@ -379,7 +396,8 @@ jobs:
             echo "Суммы продублированы в файлах \`.sha256\` рядом с каждым артефактом."
           } > hashes.md
           cat .github/release-body.md hashes.md > body.md
-      - name: Create draft, upload assets, publish
+      - name: Prepare the release draft
+        id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -395,7 +413,7 @@ jobs:
             local state="$1"
             case "${state}" in
               "missing") echo "nothing to clean up (release is absent)";;
-              "ok false 24 ${want_names}") echo "complete release left in place";;
+              "ok false ${want_names}") echo "complete release left in place";;
               "error") echo "release state unknown; not touching anything";;
               *) echo "removing incomplete release (${state})"
                  gh release delete "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --yes || true;;
@@ -405,10 +423,12 @@ jobs:
           if [ "${state}" = "error" ]; then
             echo "cannot determine the release state; aborting"; exit 1
           fi
-          if [ "${state}" = "ok false 24 ${want_names}" ]; then
+          if [ "${state}" = "ok false ${want_names}" ]; then
             echo "release ${GITHUB_REF_NAME} is already published with the complete asset set; nothing to do"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
           if [ "${state}" != "missing" ]; then
             echo "existing release is not the expected complete set (${state}); recreating"
             gh release delete "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --yes
@@ -423,6 +443,37 @@ jobs:
             cleanup_incomplete "$(release_state)"
             exit 1
           fi
+      # actions/attest-build-provenance@v4.2.2 (запиннено по SHA)
+      - name: Attest release artifacts
+        # Только когда релиз действительно создаётся (повторный прогон полного релиза
+        # не плодит дубли аттестаций и не падает из-за внешнего сервиса аттестаций).
+        if: success() && steps.prepare.outputs.skip != 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: dist/*
+      - name: Upload assets and publish
+        if: success() && steps.prepare.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -s expected_names.txt ]; then
+            echo "expected_names.txt is missing; aborting"; exit 1
+          fi
+          want_names=$(LC_ALL=C sort expected_names.txt | paste -sd, -)
+          # shellcheck source=.github/scripts/release-state.sh
+          source .github/scripts/release-state.sh
+          cleanup_incomplete() {
+            local state="$1"
+            case "${state}" in
+              "missing") echo "nothing to clean up (release is absent)";;
+              "ok false ${want_names}") echo "complete release left in place";;
+              "error") echo "release state unknown; not touching anything";;
+              *) echo "removing incomplete release (${state})"
+                 gh release delete "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --yes || true;;
+            esac
+          }
           if ! gh release upload "${GITHUB_REF_NAME}" dist/* -R "${GITHUB_REPOSITORY}"; then
             echo "asset upload failed"
             cleanup_incomplete "$(release_state)"
@@ -433,7 +484,7 @@ jobs:
             cleanup_incomplete "$(release_state)"
             exit 1
           fi
-          echo "release ${GITHUB_REF_NAME} published with 24 assets"
+          echo "release ${GITHUB_REF_NAME} published with the full asset set"
       - name: Cleanup after failure or cancellation
         if: always()
         env:
@@ -452,7 +503,7 @@ jobs:
           state=$(release_state)
           case "${state}" in
             "missing"|"error") echo "nothing to clean up (${state})";;
-            "ok false 24 ${want_names}") echo "complete release left in place";;
+            "ok false ${want_names}") echo "complete release left in place";;
             *) echo "removing leftover draft/partial release (${state})"
                gh release delete "${GITHUB_REF_NAME}" -R "${GITHUB_REPOSITORY}" --yes || true;;
           esac

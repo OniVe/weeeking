@@ -2,6 +2,15 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [Unreleased]
+
+### Добавлено
+
+- Платформа **Windows arm64**: `weeeking-<версия>-win-arm64.zip` / `.exe` (сборка на раннере
+  `windows-11-arm`, npm-обёртка определяет `win32-arm64` автоматически).
+- **GitHub-аттестации (Sigstore)** для всех файлов релиза — проверяемое происхождение сборки:
+  `gh attestation verify <файл> -R OniVe/weeeking`.
+
 ## [0.3.0] — 2026-10-09
 
 Шесть целевых платформ, версия в именах артефактов, SHA256-хэши в описании релиза и автоматическая

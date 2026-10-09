@@ -47,6 +47,7 @@ cargo build --release
 | Платформа | Архив | Сырой бинарник |
 | --- | --- | --- |
 | Windows x64 | `weeeking-<версия>-win-x64.zip` | `weeeking-<версия>-win-x64.exe` |
+| Windows arm64 | `weeeking-<версия>-win-arm64.zip` | `weeeking-<версия>-win-arm64.exe` |
 | Linux x64 (glibc) | `weeeking-<версия>-linux-x64.tar.gz` | `weeeking-<версия>-linux-x64` |
 | Linux x64 (musl, static) | `weeeking-<версия>-linux-musl-x64.tar.gz` | `weeeking-<версия>-linux-musl-x64` |
 | Linux arm64 | `weeeking-<версия>-linux-arm64.tar.gz` | `weeeking-<версия>-linux-arm64` |
@@ -59,13 +60,19 @@ certutil -hashfile weeeking-<версия>-win-x64.zip SHA256          # Windows
 sha256sum -c weeeking-<версия>-linux-x64.tar.gz.sha256           # Linux
 ```
 
+Каждый файл релиза подписан GitHub-аттестацией (Sigstore) — проверяемое происхождение сборки:
+
+```bash
+gh attestation verify weeeking-<версия>-win-x64.exe -R OniVe/weeeking
+```
+
 ### npm (npx)
 
 ```bash
 npx -y weeeking     # MCP-сервер по stdio; бинарник скачается и проверится по sha256
 ```
 
-Пакет `weeeking` — тонкая обёртка: берёт нативный бинарник нужной платформы (Windows x64,
+Пакет `weeeking` — тонкая обёртка: берёт нативный бинарник нужной платформы (Windows x64/arm64,
 Linux x64 gnu/musl, Linux arm64, macOS arm64/x64) из GitHub Releases этой же версии. Публикуется
 через npm trusted publishing (OIDC, с provenance).
 

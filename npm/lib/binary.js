@@ -15,7 +15,7 @@ const DOWNLOAD_TIMEOUT_MS = 120_000;
 const CHECKSUM_TIMEOUT_MS = 30_000;
 const ATTEMPTS = 3;
 
-const SUPPORTED = "Windows x64, Linux x64 (gnu/musl), Linux arm64, macOS arm64/x64";
+const SUPPORTED = "Windows x64/arm64, Linux x64 (gnu/musl), Linux arm64, macOS arm64/x64";
 
 /** Linux x64 поставляется в двух вариантах libc; остальные — по platform-arch. */
 function detectLibc(report) {
@@ -38,6 +38,8 @@ function resolveTarget({ platform = process.platform, arch = process.arch, libc 
   switch (key) {
     case "win32-x64":
       return { key, asset: (version) => `weeeking-${version}-win-x64.exe`, binary: "weeeking.exe" };
+    case "win32-arm64":
+      return { key, asset: (version) => `weeeking-${version}-win-arm64.exe`, binary: "weeeking.exe" };
     case "linux-x64": {
       const flavor = libc === undefined ? detectLibc() : libc;
       return flavor === "musl"

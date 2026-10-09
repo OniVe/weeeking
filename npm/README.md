@@ -2,7 +2,7 @@
 
 npm-обёртка для [Weeeking](https://github.com/OniVe/weeeking) — MCP-сервера Weeek
 (полное покрытие публичного API). Обёртка скачивает нативный бинарник
-(**Windows x64**, **Linux x64** (gnu/musl), **Linux arm64**, **macOS arm64/x64**) из GitHub Releases
+(**Windows x64/arm64**, **Linux x64** (gnu/musl), **Linux arm64**, **macOS arm64/x64**) из GitHub Releases
 этой же версии, сверяет sha256 и запускает его.
 
 ## Использование
