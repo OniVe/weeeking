@@ -2,7 +2,7 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версионирование — [SemVer](https://semver.org/lang/ru/).
 
-## [Unreleased]
+## [0.2.0] — 2026-10-09
 
 ### Добавлено
 
@@ -52,4 +52,5 @@
 - Булевы query-параметры (например, `completed`) уходят в Weeek как `1/0`: вариант `true/false`
   API отклоняет с HTTP 422. Найдено приёмочным smoke-тестом перед релизом.
 
+[0.2.0]: https://github.com/OniVe/weeeking/releases/tag/v0.2.0
 [0.1.0]: https://github.com/OniVe/weeeking/releases/tag/v0.1.0
