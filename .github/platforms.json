@@ -1,0 +1,9 @@
+[
+  { "key": "win-x64", "runner": "windows-latest", "target": "x86_64-pc-windows-msvc", "archive": "zip", "raw": ".exe" },
+  { "key": "win-arm64", "runner": "windows-11-arm", "target": "aarch64-pc-windows-msvc", "archive": "zip", "raw": ".exe" },
+  { "key": "linux-x64", "runner": "ubuntu-latest", "target": "x86_64-unknown-linux-gnu", "archive": "tar.gz", "raw": "" },
+  { "key": "linux-musl-x64", "runner": "ubuntu-latest", "target": "x86_64-unknown-linux-musl", "archive": "tar.gz", "raw": "", "alpine": true },
+  { "key": "linux-arm64", "runner": "ubuntu-24.04-arm", "target": "aarch64-unknown-linux-gnu", "archive": "tar.gz", "raw": "" },
+  { "key": "osx-arm64", "runner": "macos-15", "target": "aarch64-apple-darwin", "archive": "tar.gz", "raw": "" },
+  { "key": "osx-x64", "runner": "macos-15-intel", "target": "x86_64-apple-darwin", "archive": "tar.gz", "raw": "" }
+]

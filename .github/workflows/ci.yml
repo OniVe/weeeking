@@ -78,6 +78,27 @@ jobs:
         working-directory: npm
         run: node --test
 
+  # Единый источник списка платформ — .github/platforms.json: из него собираются матрицы
+  # build/release, список ассетов релиза (verify) и wait-список npm — ручной дрейф исключён.
+  platforms:
+    name: platforms
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.load.outputs.matrix }}
+    steps:
+      # actions/checkout@v7.0.1 (запиннено по SHA)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build the platform matrix
+        id: load
+        shell: bash
+        run: |
+          set -euo pipefail
+          matrix=$(python3 .github/scripts/platforms.py matrix)
+          if [ -z "${matrix}" ]; then
+            echo "failed to build the platform matrix"; exit 1
+          fi
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+
   # Проверочная сборка всех релизных платформ на main (+ dispatch не по тегу):
   # поломки платформ должны ловиться до тега, а не на релизе. PR не гоняем — экономим время.
   build-matrix:
@@ -85,31 +106,11 @@ jobs:
     if: >-
       (github.event_name == 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/v'))
       || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    needs: platforms
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            key: win-x64
-          - runner: windows-11-arm
-            target: aarch64-pc-windows-msvc
-            key: win-arm64
-          - runner: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            key: linux-x64
-          - runner: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            key: linux-musl-x64
-          - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            key: linux-arm64
-          - runner: macos-15
-            target: aarch64-apple-darwin
-            key: osx-arm64
-          - runner: macos-15-intel
-            target: x86_64-apple-darwin
-            key: osx-x64
+        include: ${{ fromJSON(needs.platforms.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     env:
       TARGET: ${{ matrix.target }}
@@ -157,7 +158,7 @@ jobs:
           if [ -f "${bin}.exe" ]; then bin="${bin}.exe"; fi
           "${bin}" --help > /dev/null
       - name: Smoke in Alpine container (musl)
-        if: matrix.key == 'linux-musl-x64'
+        if: matrix.alpine == true
         shell: bash
         run: |
           docker run --rm -v "${GITHUB_WORKSPACE}/target/${TARGET}/release:/m:ro" alpine:3.20 /m/weeeking --help > /dev/null
@@ -165,32 +166,11 @@ jobs:
   release:
     name: release (${{ matrix.key }})
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: test
+    needs: [test, platforms]
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            key: win-x64
-          - runner: windows-11-arm
-            target: aarch64-pc-windows-msvc
-            key: win-arm64
-          - runner: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            key: linux-x64
-          - runner: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            key: linux-musl-x64
-          - runner: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            key: linux-arm64
-          - runner: macos-15
-            target: aarch64-apple-darwin
-            key: osx-arm64
-          - runner: macos-15-intel
-            target: x86_64-apple-darwin
-            key: osx-x64
+        include: ${{ fromJSON(needs.platforms.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     env:
       TARGET: ${{ matrix.target }}
@@ -234,6 +214,10 @@ jobs:
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
           if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
             echo "tag ${GITHUB_REF_NAME} does not match v${version}"; exit 1
+          fi
+          npm_version=$(sed -n 's/.*"version": "\(.*\)".*/\1/p' npm/package.json | head -1)
+          if [ "${npm_version}" != "${version}" ]; then
+            echo "npm/package.json version ${npm_version} does not match Cargo version ${version}"; exit 1
           fi
           if [ ! -s .github/release-body.md ]; then
             echo ".github/release-body.md is missing or empty"; exit 1
@@ -347,22 +331,8 @@ jobs:
           if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
             echo "tag ${GITHUB_REF_NAME} does not match v${version}"; exit 1
           fi
-          expected=""
-          add() { expected="${expected}$1"$'\n'; }
-          add "weeeking-${version}-win-x64.zip"
-          add "weeeking-${version}-win-x64.zip.sha256"
-          add "weeeking-${version}-win-x64.exe"
-          add "weeeking-${version}-win-x64.exe.sha256"
-          add "weeeking-${version}-win-arm64.zip"
-          add "weeeking-${version}-win-arm64.zip.sha256"
-          add "weeeking-${version}-win-arm64.exe"
-          add "weeeking-${version}-win-arm64.exe.sha256"
-          for key in linux-x64 linux-musl-x64 linux-arm64 osx-arm64 osx-x64; do
-            add "weeeking-${version}-${key}.tar.gz"
-            add "weeeking-${version}-${key}.tar.gz.sha256"
-            add "weeeking-${version}-${key}"
-            add "weeeking-${version}-${key}.sha256"
-          done
+          # Список ассетов — из единого источника платформ.
+          expected=$(python3 .github/scripts/platforms.py names "${version}")
           failed=0
           for name in ${expected}; do
             if [ ! -f "dist/${name}" ]; then echo "missing asset: ${name}"; failed=1; fi
