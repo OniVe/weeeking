@@ -11,6 +11,12 @@ pub struct Config {
     pub keychain_account: String,
     /// Лимит на скачивание вложения (защита от гигантских ответов), по умолчанию 64 МиБ.
     pub max_attachment_bytes: usize,
+    /// Сколько дополнительных попыток делать при 429/5xx (WEEEK_RETRY_MAX, по умолчанию 2).
+    pub retry_max: u32,
+    /// Базовая задержка экспоненциального бэкоффа в мс (WEEEK_RETRY_BASE_MS, по умолчанию 300).
+    pub retry_base_ms: u64,
+    /// Подробные HTTP-логи в stderr (WEEEK_LOG=debug).
+    pub log_debug: bool,
 }
 
 /// Нормализует имя аккаунта из значения переменной окружения.
@@ -59,6 +65,25 @@ impl Config {
             .and_then(|v| v.trim().parse::<usize>().ok())
             .filter(|v| *v > 0)
             .unwrap_or(64 * 1024 * 1024);
+        let retry_max = env::var("WEEEK_RETRY_MAX")
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .unwrap_or(2)
+            .min(5);
+        let retry_base_ms = env::var("WEEEK_RETRY_BASE_MS")
+            .ok()
+            .and_then(|v| v.trim().parse::<u64>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(300)
+            .min(60_000);
+        let log_debug = matches!(
+            env::var("WEEEK_LOG")
+                .unwrap_or_default()
+                .trim()
+                .to_ascii_lowercase()
+                .as_str(),
+            "debug" | "trace"
+        );
 
         Self {
             base_url,
@@ -68,6 +93,9 @@ impl Config {
             disable_keychain,
             keychain_account,
             max_attachment_bytes,
+            retry_max,
+            retry_base_ms,
+            log_debug,
         }
     }
 }

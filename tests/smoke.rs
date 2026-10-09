@@ -246,3 +246,59 @@ fn path_params_are_validated_for_empty_and_type() {
         "numeric id for a string path param must be coerced and reach the token check: {text}"
     );
 }
+
+#[test]
+fn resources_and_prompts_are_exposed() {
+    let mut client = McpClient::start(&[]);
+
+    let resources = client.list_resources();
+    let uris: Vec<&str> = resources
+        .iter()
+        .filter_map(|resource| resource["uri"].as_str())
+        .collect();
+    assert!(
+        uris.contains(&"weeek://me"),
+        "ресурс пользователя: {uris:?}"
+    );
+    assert!(
+        uris.contains(&"weeek://projects"),
+        "ресурс проектов: {uris:?}"
+    );
+
+    // Без токена чтение даёт понятную JSON-RPC ошибку, а не пустой ответ.
+    let response = client.request("resources/read", json!({ "uri": "weeek://me" }));
+    let message = response["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("WEEEK_API_TOKEN"),
+        "ошибка чтения должна упоминать токен: {response}"
+    );
+
+    let unknown = client.request("resources/read", json!({ "uri": "weeek://nope" }));
+    assert!(
+        unknown.get("error").is_some(),
+        "неизвестный ресурс отвергается: {unknown}"
+    );
+
+    let prompts = client.list_prompts();
+    let names: Vec<&str> = prompts
+        .iter()
+        .filter_map(|prompt| prompt["name"].as_str())
+        .collect();
+    assert!(names.contains(&"my-tasks-today"), "промпты: {names:?}");
+    assert!(names.contains(&"week-review"), "промпты: {names:?}");
+
+    let prompt = client.get_prompt("my-tasks-today");
+    let text = prompt["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        text.contains("weeek_search_tasks"),
+        "промпт должен направлять к инструментам: {text}"
+    );
+
+    let unknown_prompt = client.request("prompts/get", json!({ "name": "nope" }));
+    assert!(
+        unknown_prompt.get("error").is_some(),
+        "неизвестный промпт отвергается: {unknown_prompt}"
+    );
+}

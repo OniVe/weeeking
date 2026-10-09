@@ -153,6 +153,27 @@ class McpClient:
         result = self._wait_for(self._next_id)
         return [tool["name"] for tool in result["tools"]]
 
+    def request(self, method: str, params: dict) -> dict:
+        self._next_id += 1
+        self._send(
+            {
+                "jsonrpc": "2.0",
+                "id": self._next_id,
+                "method": method,
+                "params": params,
+            }
+        )
+        return self._wait_for(self._next_id)
+
+    def list_resources(self) -> list[dict]:
+        return self.request("resources/list", {}).get("resources", [])
+
+    def read_resource(self, uri: str) -> dict:
+        return self.request("resources/read", {"uri": uri})
+
+    def list_prompts(self) -> list[dict]:
+        return self.request("prompts/list", {}).get("prompts", [])
+
     def close(self) -> None:
         try:
             if self.proc.stdin:
@@ -214,6 +235,24 @@ def run_read_only(client: McpClient, failures: list[str], write_mode: bool) -> i
         check("task" in card, f"карточка задачи {task_id} получена", failures)
     else:
         print("  [skip] задач для выборки нет — карточку не проверяем")
+
+    resources = client.list_resources()
+    uris = [resource.get("uri") for resource in resources]
+    check(
+        "weeek://me" in uris and "weeek://projects" in uris,
+        f"ресурсы: {uris}",
+        failures,
+    )
+    me = client.read_resource("weeek://me")
+    me_text = (me.get("contents") or [{}])[0].get("text", "")
+    check("id" in me_text, "weeek://me читается", failures)
+
+    prompts = [prompt.get("name") for prompt in client.list_prompts()]
+    check(
+        "my-tasks-today" in prompts and "week-review" in prompts,
+        f"промпты: {prompts}",
+        failures,
+    )
     return task_id
 
 

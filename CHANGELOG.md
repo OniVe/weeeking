@@ -2,6 +2,27 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [Unreleased]
+
+### Добавлено
+
+- MCP resources: `weeek://me`, `weeek://projects` — контекст воркспейса без tool-call (кэш 5 минут,
+  read-only-режим включён).
+- MCP prompts: «Мои задачи на сегодня», «Итоги недели».
+- `compact=true` для `weeek_context`, `weeek_search_tasks`, `weeek_get_task`, `weeek_list_comments` —
+  рекурсивно убирает null и пустые значения, включая пустые элементы массивов (`false`/`0` сохраняются).
+- `fetchAll=true` + `maxItems` для `weeek_search_tasks` и `weeek_list_comments` — постраничный сбор
+  (страница по умолчанию 100, не более 50 страниц) с флагом `truncated` (потолок по умолчанию 200, максимум 1000).
+- Ретраи 429 и 502/503/504: `Retry-After` и экспоненциальный бэкофф; 429 — для любого метода, 502/503/504 и
+  сетевые сбои (кроме таймаутов) — только для идемпотентных GET/HEAD. Настройки `WEEEK_RETRY_MAX`,
+  `WEEEK_RETRY_BASE_MS`.
+- `WEEEK_LOG=debug` — HTTP-логи в stderr (метод, путь, статус, длительность) без токена.
+
+### Изменено
+
+- `weeek_search_tasks` всегда передаёт `perPage`/`offset` явно (по умолчанию 25/0) — пагинация
+  собирается детерминированно.
+
 ## [0.1.0] — 2026-10-08
 
 Первый публичный пилот: полное покрытие публичного API Weeek (157 операций) одним Rust-бинарником.

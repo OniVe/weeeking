@@ -1,5 +1,5 @@
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, ToolAnnotations};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use std::sync::Arc;
 
 pub fn json_result(value: &Value, max_chars: usize) -> CallToolResult {
@@ -18,6 +18,41 @@ pub fn truncate(s: &str, max: usize) -> String {
     }
     let taken: String = s.chars().take(max).collect();
     format!("{taken}\n…[ответ обрезан: {max} из {total} символов]")
+}
+
+/// Рекурсивно убирает из JSON `null`, пустые строки, массивы и объекты.
+/// `false` и `0` сохраняются: они несут смысл (например, `completed=false`).
+pub fn compact(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut out = Map::new();
+            for (key, item) in map {
+                let compacted = compact(item);
+                if !is_empty_json(&compacted) {
+                    out.insert(key.clone(), compacted);
+                }
+            }
+            Value::Object(out)
+        }
+        Value::Array(items) => Value::Array(
+            items
+                .iter()
+                .map(compact)
+                .filter(|item| !is_empty_json(item))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+fn is_empty_json(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::String(text) => text.is_empty(),
+        Value::Array(items) => items.is_empty(),
+        Value::Object(map) => map.is_empty(),
+        _ => false,
+    }
 }
 
 pub fn ann(read_only: bool, destructive: bool, idempotent: bool) -> ToolAnnotations {
@@ -190,5 +225,30 @@ mod tests {
                 ("perPage".to_string(), "5".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn compact_strips_empty_values_only() {
+        let input = json!({
+            "id": 1,
+            "title": "",
+            "completed": false,
+            "priority": 0,
+            "dueDate": null,
+            "tags": [],
+            "customFields": {},
+            "nested": { "empty": null, "kept": "x", "list": [null, "", [], {}, "ok", false] }
+        });
+        let out = compact(&input);
+        assert_eq!(out["id"], 1);
+        assert_eq!(out["completed"], false);
+        assert_eq!(out["priority"], 0);
+        assert!(out.get("title").is_none());
+        assert!(out.get("dueDate").is_none());
+        assert!(out.get("tags").is_none());
+        assert!(out.get("customFields").is_none());
+        assert!(out["nested"].get("empty").is_none());
+        assert_eq!(out["nested"]["kept"], "x");
+        assert_eq!(out["nested"]["list"], json!(["ok", false]));
     }
 }

@@ -9,7 +9,7 @@ use std::collections::VecDeque;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tiny_http::{Header, ListenAddr, Response, Server, StatusCode};
 
 struct Canned {
@@ -17,6 +17,7 @@ struct Canned {
     content_type: &'static str,
     body: Vec<u8>,
     disposition: Option<String>,
+    retry_after: Option<String>,
     delay_ms: u64,
     /// true — ответ без Content-Length (chunked transfer).
     chunked: bool,
@@ -29,6 +30,7 @@ impl Canned {
             content_type: "application/json",
             body: body.as_bytes().to_vec(),
             disposition: None,
+            retry_after: None,
             delay_ms: 0,
             chunked: false,
         }
@@ -47,6 +49,7 @@ impl Canned {
             content_type: "application/octet-stream",
             body,
             disposition: None,
+            retry_after: None,
             delay_ms: 0,
             chunked: false,
         }
@@ -93,6 +96,12 @@ impl MockServer {
                                     disposition.as_bytes(),
                                 )
                                 .unwrap(),
+                            );
+                        }
+                        if let Some(retry_after) = &item.retry_after {
+                            headers.push(
+                                Header::from_bytes(&b"Retry-After"[..], retry_after.as_bytes())
+                                    .unwrap(),
                             );
                         }
                         let data = Cursor::new(item.body.clone());
@@ -187,14 +196,20 @@ fn timeout_is_reported() {
         delay_ms: 1500,
         ..Canned::json("{}")
     }]);
+    // Таймауты не ретраятся даже с дефолтными повторами: одна попытка, одна ошибка.
     let mut client = server.client(&[("WEEEK_TIMEOUT_MS", "300")]);
 
-    let call = client.call_tool("weeek_context", json!({}));
+    let call = client.call_tool("weeek_list_comments", json!({ "taskId": 1 }));
     assert_eq!(call["isError"], true, "timeout must map to isError: {call}");
     let text = result_text(&call);
     assert!(
         text.contains("таймаут") || text.contains("Сетевая ошибка"),
         "timeout must be reported: {text}"
+    );
+    assert_eq!(
+        server.requests().len(),
+        1,
+        "таймаут израсходовал бюджет запроса — повтор не делается"
     );
 }
 
@@ -318,4 +333,251 @@ fn unauthorized_is_reported() {
     assert_eq!(call["isError"], true, "401 must map to isError: {call}");
     let text = result_text(&call);
     assert!(text.contains("HTTP 401"), "status must be visible: {text}");
+}
+
+#[test]
+fn retry_on_429_then_success() {
+    let server = MockServer::start(vec![
+        Canned::status_json(429, r#"{"message":"rate limited"}"#),
+        Canned::json(r#"{"success":true,"comments":[]}"#),
+    ]);
+    let mut client = server.client(&[("WEEEK_RETRY_BASE_MS", "10")]);
+
+    let call = client.call_tool("weeek_list_comments", json!({ "taskId": 1 }));
+    assert_ne!(
+        call["isError"], true,
+        "после 429 запрос должен повториться: {call}"
+    );
+    assert_eq!(server.requests().len(), 2, "ровно один повтор");
+}
+
+#[test]
+fn retry_after_header_is_honored() {
+    let server = MockServer::start(vec![
+        Canned {
+            retry_after: Some("1".to_string()),
+            ..Canned::status_json(429, "{}")
+        },
+        Canned::json(r#"{"success":true,"comments":[]}"#),
+    ]);
+    let mut client = server.client(&[("WEEEK_RETRY_BASE_MS", "10")]);
+
+    let started = Instant::now();
+    let call = client.call_tool("weeek_list_comments", json!({ "taskId": 1 }));
+    assert_ne!(call["isError"], true);
+    assert!(
+        started.elapsed() >= Duration::from_millis(700),
+        "Retry-After: 1 должен задержать повтор (~1 с), а не бэкофф 10 мс: {:?}",
+        started.elapsed()
+    );
+    assert_eq!(server.requests().len(), 2);
+}
+
+#[test]
+fn get_retries_on_503_then_succeeds() {
+    let server = MockServer::start(vec![
+        Canned::status_json(503, "oops"),
+        Canned::json(r#"{"success":true,"comments":[]}"#),
+    ]);
+    let mut client = server.client(&[("WEEEK_RETRY_BASE_MS", "10")]);
+
+    let call = client.call_tool("weeek_list_comments", json!({ "taskId": 1 }));
+    assert_ne!(
+        call["isError"], true,
+        "GET должен повториться после 503: {call}"
+    );
+    assert_eq!(server.requests().len(), 2);
+}
+
+#[test]
+fn post_is_not_retried_on_5xx() {
+    let server = MockServer::start(vec![Canned::status_json(500, "boom")]);
+    let mut client = server.client(&[("READ_ONLY", "false"), ("WEEEK_RETRY_BASE_MS", "10")]);
+
+    let call = client.call_tool("weeek_create_task", json!({ "title": "t", "projectId": 1 }));
+    assert_eq!(
+        call["isError"], true,
+        "500 на POST — ошибка без повторов: {call}"
+    );
+    assert_eq!(server.requests().len(), 1, "POST не повторяем при 5xx");
+    assert!(result_text(&call).contains("HTTP 500"));
+}
+
+#[test]
+fn retries_are_exhausted() {
+    let server = MockServer::start(vec![
+        Canned::status_json(503, "a"),
+        Canned::status_json(503, "b"),
+        Canned::status_json(503, "c"),
+    ]);
+    let mut client = server.client(&[("WEEEK_RETRY_MAX", "2"), ("WEEEK_RETRY_BASE_MS", "10")]);
+
+    let call = client.call_tool("weeek_list_comments", json!({ "taskId": 1 }));
+    assert_eq!(call["isError"], true);
+    assert_eq!(server.requests().len(), 3, "1 попытка + 2 ретрая");
+    assert!(result_text(&call).contains("HTTP 503"));
+}
+
+#[test]
+fn debug_log_lines_are_emitted() {
+    let server = MockServer::start(vec![Canned::json(r#"{"success":true,"comments":[]}"#)]);
+    let mut client = server.client(&[("WEEEK_LOG", "debug")]);
+
+    let call = client.call_tool("weeek_list_comments", json!({ "taskId": 1 }));
+    assert_ne!(call["isError"], true);
+    assert!(
+        client.wait_for_stderr("GET /tm/tasks/1/comments", Duration::from_millis(2000)),
+        "debug-лог должен содержать метод и путь: {}",
+        client.stderr_snapshot()
+    );
+    let log = client.stderr_snapshot();
+    assert!(log.contains("-> 200"), "в логе должен быть статус: {log}");
+    assert!(
+        !log.contains("test-token"),
+        "токен не должен попадать в логи: {log}"
+    );
+}
+
+#[test]
+fn compact_strips_nulls_and_empties() {
+    let server = MockServer::start(vec![
+        Canned::json(
+            r#"{"success":true,"task":{"id":1,"title":"T","description":"","assignees":[],"customFields":{},"dueDate":null,"completed":false}}"#,
+        ),
+        Canned::json(r#"{"success":true,"comments":[]}"#),
+    ]);
+    let mut client = server.client(&[]);
+
+    let call = client.call_tool("weeek_get_task", json!({ "taskId": 1, "compact": true }));
+    assert_ne!(call["isError"], true, "compact call must succeed: {call}");
+    let parsed: Value = serde_json::from_str(&result_text(&call)).expect("json");
+    // Ответ get_task — сырой конверт API: {"task": {"success": true, "task": {...}}}.
+    let task = &parsed["task"]["task"];
+    assert_eq!(task["completed"], false, "false не должен исчезать");
+    assert!(task.get("dueDate").is_none(), "null убран: {task}");
+    assert!(task.get("description").is_none(), "пустая строка убрана");
+    assert!(task.get("assignees").is_none(), "пустой массив убран");
+    assert!(task.get("customFields").is_none(), "пустой объект убран");
+}
+
+#[test]
+fn fetch_all_pages_are_merged() {
+    let server = MockServer::start(vec![
+        Canned::json(r#"{"tasks":[{"id":1}],"hasMore":true}"#),
+        Canned::json(r#"{"tasks":[{"id":2}],"hasMore":false}"#),
+    ]);
+    let mut client = server.client(&[]);
+
+    let call = client.call_tool(
+        "weeek_search_tasks",
+        json!({ "fetchAll": true, "perPage": 1 }),
+    );
+    assert_ne!(call["isError"], true, "fetchAll must succeed: {call}");
+    let parsed: Value = serde_json::from_str(&result_text(&call)).expect("json");
+    assert_eq!(parsed["tasks"], json!([{ "id": 1 }, { "id": 2 }]));
+    assert_eq!(parsed["truncated"], false);
+    let requests = server.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[1].1.contains("offset=1"),
+        "вторая страница с offset=1: {requests:?}"
+    );
+}
+
+#[test]
+fn fetch_all_respects_max_items() {
+    let server = MockServer::start(vec![Canned::json(
+        r#"{"tasks":[{"id":1},{"id":2},{"id":3}],"hasMore":true}"#,
+    )]);
+    let mut client = server.client(&[]);
+
+    let call = client.call_tool(
+        "weeek_search_tasks",
+        json!({ "fetchAll": true, "maxItems": 2 }),
+    );
+    assert_ne!(call["isError"], true);
+    let parsed: Value = serde_json::from_str(&result_text(&call)).expect("json");
+    assert_eq!(parsed["tasks"], json!([{ "id": 1 }, { "id": 2 }]));
+    assert_eq!(parsed["truncated"], true, "потолок достигнут — truncated");
+    assert_eq!(
+        server.requests().len(),
+        1,
+        "потолок достигнут на первой странице"
+    );
+}
+
+#[test]
+fn fetch_all_without_has_more_stops_on_partial_page() {
+    // API не отдал hasMore: полная страница — идём дальше, неполная — стоп.
+    let server = MockServer::start(vec![
+        Canned::json(r#"{"tasks":[{"id":1}]}"#),
+        Canned::json(r#"{"tasks":[]}"#),
+    ]);
+    let mut client = server.client(&[]);
+
+    let call = client.call_tool(
+        "weeek_search_tasks",
+        json!({ "fetchAll": true, "perPage": 1 }),
+    );
+    assert_ne!(call["isError"], true);
+    let parsed: Value = serde_json::from_str(&result_text(&call)).expect("json");
+    assert_eq!(parsed["tasks"], json!([{ "id": 1 }]));
+    assert_eq!(parsed["truncated"], false, "естественный конец, не потолок");
+    assert_eq!(
+        server.requests().len(),
+        2,
+        "неполная страница завершает сбор"
+    );
+}
+
+#[test]
+fn fetch_all_comments_merges_pages() {
+    let server = MockServer::start(vec![
+        Canned::json(r#"{"success":true,"comments":[{"id":1}],"hasMore":true}"#),
+        Canned::json(r#"{"success":true,"comments":[{"id":2}],"hasMore":false}"#),
+    ]);
+    let mut client = server.client(&[]);
+
+    let call = client.call_tool(
+        "weeek_list_comments",
+        json!({ "taskId": 5, "fetchAll": true, "limit": 1 }),
+    );
+    assert_ne!(call["isError"], true);
+    let parsed: Value = serde_json::from_str(&result_text(&call)).expect("json");
+    assert_eq!(parsed["comments"], json!([{ "id": 1 }, { "id": 2 }]));
+    assert_eq!(parsed["truncated"], false);
+    assert_eq!(server.requests().len(), 2);
+}
+
+#[test]
+fn resources_read_from_context_cache() {
+    // Пять запросов контекста приходят параллельно — отдаём одинаковые конверты,
+    // чтобы результат не зависел от порядка доставки.
+    let full = r#"{"success":true,"user":{"id":"u1","firstName":"Test"},"workspace":{"id":1,"title":"WS"},"members":[{"id":"m1"}],"tags":[{"id":2}],"projects":[{"id":7,"name":"P"}]}"#;
+    let server = MockServer::start(vec![
+        Canned::json(full),
+        Canned::json(full),
+        Canned::json(full),
+        Canned::json(full),
+        Canned::json(full),
+    ]);
+    let mut client = server.client(&[]);
+
+    let resources = client.list_resources();
+    assert_eq!(resources.len(), 2, "ресурсы: {resources:?}");
+    assert!(resources.iter().any(|r| r["uri"] == "weeek://me"));
+
+    let me = client.read_resource("weeek://me");
+    let text = me["contents"][0]["text"].as_str().expect("text");
+    assert!(text.contains("u1"), "user JSON: {text}");
+
+    // Контекст закэширован: второе чтение не ходит в сеть.
+    let projects = client.read_resource("weeek://projects");
+    let text = projects["contents"][0]["text"].as_str().expect("text");
+    assert!(text.contains("\"id\": 7"), "projects JSON: {text}");
+    assert_eq!(
+        server.requests().len(),
+        5,
+        "контекст закэширован после первого чтения"
+    );
 }

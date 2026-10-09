@@ -46,17 +46,66 @@ fn tool(
 const TASK_ID: &str = "ID задачи (целое число)";
 const MEMBER_ID: &str = "UUID участника воркспейса (weeek_context → members[].id)";
 
+/// Фильтры поиска задач; пагинацией управляют perPage/offset (их добавляет `filtered_query`).
+const TASK_FILTER_KEYS: &[&str] = &[
+    "day",
+    "userId",
+    "projectId",
+    "completed",
+    "boardId",
+    "boardColumnId",
+    "type",
+    "priority",
+    "tags",
+    "search",
+    "sortBy",
+    "desc",
+    "startDate",
+    "endDate",
+    "completedAtFrom",
+    "completedAtTo",
+    "all",
+];
+
+fn filtered_query(
+    args: &Map<String, Value>,
+    keys: &[&str],
+    per_page: i64,
+    offset: i64,
+) -> Vec<(String, String)> {
+    let mut query = Vec::new();
+    for key in keys {
+        if let Some(value) = args.get(*key) {
+            push_query(&mut query, key, value);
+        }
+    }
+    query.push(("perPage".to_string(), per_page.to_string()));
+    query.push(("offset".to_string(), offset.to_string()));
+    query
+}
+
+/// Достаёт список из конверта API (`{"tasks": [...]}`), терпимо к прямому массиву.
+fn extract_list(value: &Value, key: &str) -> Vec<Value> {
+    match value.get(key) {
+        Some(Value::Array(items)) => items.clone(),
+        None => value.as_array().cloned().unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
 pub fn tools(read_only: bool) -> Vec<Tool> {
     let mut out = vec![
         tool(
             "weeek_context",
             "Weeek: контекст",
             "Кто вы, воркспейс, участники, теги и проекты одним вызовом. Отсюда берутся все ID для остальных \
-             инструментов. projectId добавляет доски проекта, boardId — колонки доски. Кэш 5 минут (refresh=true — сбросить).",
+             инструментов. projectId добавляет доски проекта, boardId — колонки доски. Кэш 5 минут (refresh=true — \
+             сбросить). compact=true — убрать null и пустые поля.",
             json!({
                 "projectId": { "type": "integer", "description": "Добавить доски этого проекта" },
                 "boardId": { "type": "integer", "description": "Добавить колонки этой доски" },
-                "refresh": { "type": "boolean", "description": "Принудительно обновить кэш" }
+                "refresh": { "type": "boolean", "description": "Принудительно обновить кэш" },
+                "compact": { "type": "boolean", "description": "Убрать null и пустые поля из ответа" }
             }),
             &[],
             ann(true, false, true),
@@ -65,7 +114,10 @@ pub fn tools(read_only: bool) -> Vec<Tool> {
             "weeek_search_tasks",
             "Weeek: поиск задач",
             "Поиск задач с фильтрами (проект, доска, колонка, исполнитель, завершённость, приоритет, тип, теги, текст, даты). \
-             Пагинация perPage (1–100, по умолчанию 25) и offset. 'search' ищет по заголовку и описанию.",
+             Пагинация perPage (1–100, по умолчанию 25) и offset. 'search' ищет по заголовку и описанию. \
+             fetchAll=true собирает все страницы подряд (страница по умолчанию 100, но не более 50 страниц; \
+             maxItems — потолок, по умолчанию 200, максимум 1000); compact=true убирает null и пустые значения \
+             (включая пустые элементы массивов).",
             json!({
                 "projectId": { "type": "integer" },
                 "boardId": { "type": "integer" },
@@ -85,7 +137,10 @@ pub fn tools(read_only: bool) -> Vec<Tool> {
                 "perPage": { "type": "integer", "minimum": 1, "maximum": 100 },
                 "offset": { "type": "integer", "minimum": 0 },
                 "sortBy": { "type": "string", "enum": ["name", "type", "priority", "duration", "overdue", "created", "date", "start"] },
-                "desc": { "type": "boolean", "description": "Сортировать по убыванию" }
+                "desc": { "type": "boolean", "description": "Сортировать по убыванию" },
+                "fetchAll": { "type": "boolean", "description": "Собрать все страницы до конца или до maxItems" },
+                "maxItems": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Потолок для fetchAll (по умолчанию 200)" },
+                "compact": { "type": "boolean", "description": "Убрать null и пустые поля из ответа" }
             }),
             &[],
             ann(true, false, true),
@@ -93,11 +148,13 @@ pub fn tools(read_only: bool) -> Vec<Tool> {
         tool(
             "weeek_get_task",
             "Weeek: задача",
-            "Задача целиком: карточка плюс (по умолчанию) ветка комментариев — свежие первыми.",
+            "Задача целиком: карточка плюс (по умолчанию) ветка комментариев — свежие первыми. \
+             compact=true — убрать null и пустые поля.",
             json!({
                 "taskId": { "type": "integer", "description": TASK_ID },
                 "includeComments": { "type": "boolean", "description": "Загрузить комментарии (по умолчанию true)" },
-                "commentsLimit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Сколько комментариев вернуть (по умолчанию 20)" }
+                "commentsLimit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Сколько комментариев вернуть (по умолчанию 20)" },
+                "compact": { "type": "boolean", "description": "Убрать null и пустые поля из ответа" }
             }),
             &["taskId"],
             ann(true, false, true),
@@ -105,11 +162,16 @@ pub fn tools(read_only: bool) -> Vec<Tool> {
         tool(
             "weeek_list_comments",
             "Weeek: комментарии задачи",
-            "Ветка комментариев задачи отдельно от карточки. Свежие первыми; offset листает в прошлое.",
+            "Ветка комментариев задачи отдельно от карточки. Свежие первыми; offset листает в прошлое. \
+             fetchAll=true собирает все страницы (страница по умолчанию 100, но не более 50 страниц; maxItems — \
+             потолок, по умолчанию 200); compact=true — убрать null и пустые значения (включая пустые элементы массивов).",
             json!({
                 "taskId": { "type": "integer", "description": TASK_ID },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "1–100, по умолчанию 50" },
-                "offset": { "type": "integer", "minimum": 0, "description": "Сколько пропустить, по умолчанию 0" }
+                "offset": { "type": "integer", "minimum": 0, "description": "Сколько пропустить, по умолчанию 0" },
+                "fetchAll": { "type": "boolean", "description": "Собрать все страницы до конца или до maxItems" },
+                "maxItems": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Потолок для fetchAll (по умолчанию 200)" },
+                "compact": { "type": "boolean", "description": "Убрать null и пустые поля из ответа" }
             }),
             &["taskId"],
             ann(true, false, true),
@@ -276,8 +338,8 @@ impl WeeekingServer {
         }))
     }
 
-    async fn tool_context(&self, args: &Map<String, Value>) -> Result<Value, String> {
-        let refresh = arg_bool(args, "refresh").unwrap_or(false);
+    /// Контекст из кэша (5 минут) или свежий. Используется тулом и ресурсами.
+    pub(crate) async fn context_cached(&self, refresh: bool) -> Result<Value, String> {
         let cached = {
             let guard = self.context_cache.lock().expect("context cache");
             match guard.as_ref() {
@@ -287,15 +349,20 @@ impl WeeekingServer {
                 _ => None,
             }
         };
-        let mut data = match cached {
-            Some(value) => value,
+        match cached {
+            Some(value) => Ok(value),
             None => {
                 let value = self.fetch_context().await?;
                 *self.context_cache.lock().expect("context cache") =
                     Some((std::time::Instant::now(), value.clone()));
-                value
+                Ok(value)
             }
-        };
+        }
+    }
+
+    async fn tool_context(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let refresh = arg_bool(args, "refresh").unwrap_or(false);
+        let mut data = self.context_cached(refresh).await?;
 
         let object = data
             .as_object_mut()
@@ -318,45 +385,85 @@ impl WeeekingServer {
                 .map_err(|e| e.to_string())?;
             object.insert("boardColumns".into(), unwrap_key(columns, "boardColumns"));
         }
+        if arg_bool(args, "compact").unwrap_or(false) {
+            data = compact(&data);
+        }
         Ok(data)
     }
 
     async fn tool_search_tasks(&self, args: &Map<String, Value>) -> Result<Value, String> {
-        let keys = [
-            "day",
-            "userId",
-            "projectId",
-            "completed",
-            "boardId",
-            "boardColumnId",
-            "type",
-            "priority",
-            "tags",
-            "search",
-            "perPage",
-            "offset",
-            "sortBy",
-            "desc",
-            "startDate",
-            "endDate",
-            "completedAtFrom",
-            "completedAtTo",
-            "all",
-        ];
-        let mut query = Vec::new();
-        for key in keys {
-            if let Some(value) = args.get(key) {
-                push_query(&mut query, key, value);
+        let compact_flag = arg_bool(args, "compact").unwrap_or(false);
+        let value = if arg_bool(args, "fetchAll").unwrap_or(false) {
+            self.search_all_pages(args).await?
+        } else {
+            let per_page = arg_i64(args, "perPage").unwrap_or(25).clamp(1, 100);
+            let offset = arg_i64(args, "offset").unwrap_or(0).max(0);
+            let query = filtered_query(args, TASK_FILTER_KEYS, per_page, offset);
+            self.client
+                .call("GET", "/tm/tasks", &query, None)
+                .await
+                .map_err(|e| e.to_string())?
+        };
+        Ok(if compact_flag { compact(&value) } else { value })
+    }
+
+    /// Постраничный сбор задач: идём по offset, пока сервер отдаёт `hasMore`,
+    /// не упрёмся в `maxItems` (тогда `truncated=true`) или в 50 страниц.
+    async fn search_all_pages(&self, args: &Map<String, Value>) -> Result<Value, String> {
+        let per_page = arg_i64(args, "perPage").unwrap_or(100).clamp(1, 100);
+        let max_items = arg_i64(args, "maxItems").unwrap_or(200).clamp(1, 1000) as usize;
+        let mut offset = arg_i64(args, "offset").unwrap_or(0).max(0);
+        let mut collected: Vec<Value> = Vec::new();
+        let mut truncated = false;
+        let mut page_index = 0;
+        loop {
+            page_index += 1;
+            if page_index > 50 {
+                truncated = true;
+                break;
             }
+            let query = filtered_query(args, TASK_FILTER_KEYS, per_page, offset);
+            let page = self
+                .client
+                .call("GET", "/tm/tasks", &query, None)
+                .await
+                .map_err(|e| e.to_string())?;
+            let tasks = extract_list(&page, "tasks");
+            let received = tasks.len();
+            let mut capped = false;
+            for task in tasks {
+                if collected.len() >= max_items {
+                    capped = true;
+                    break;
+                }
+                collected.push(task);
+            }
+            if capped {
+                truncated = true;
+                break;
+            }
+            match page.get("hasMore").and_then(Value::as_bool) {
+                Some(true) => {}
+                Some(false) => break,
+                None => {
+                    // API не отдал hasMore — останавливаемся на неполной странице.
+                    if received < per_page as usize {
+                        break;
+                    }
+                }
+            }
+            if collected.len() >= max_items {
+                truncated = true;
+                break;
+            }
+            offset += per_page;
         }
-        self.client
-            .call("GET", "/tm/tasks", &query, None)
-            .await
-            .map_err(|e| e.to_string())
+        Ok(json!({ "tasks": collected, "truncated": truncated }))
     }
 
     async fn tool_get_task(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let task_id = req_i64(args, "taskId")?;
+        let compact_flag = arg_bool(args, "compact").unwrap_or(false);
         let task = self
             .client
             .call("GET", &format!("/tm/tasks/{task_id}"), &[], None)
@@ -364,7 +471,8 @@ impl WeeekingServer {
             .map_err(|e| e.to_string())?;
         let include_comments = arg_bool(args, "includeComments").unwrap_or(true);
         if !include_comments {
-            return Ok(json!({ "task": task }));
+            let value = json!({ "task": task });
+            return Ok(if compact_flag { compact(&value) } else { value });
         }
         let limit = arg_i64(args, "commentsLimit").unwrap_or(20).clamp(1, 100);
         let query = vec![
@@ -381,26 +489,98 @@ impl WeeekingServer {
             )
             .await
             .map_err(|e| e.to_string())?;
-        Ok(json!({ "task": task, "comments": comments }))
+        let value = json!({ "task": task, "comments": comments });
+        Ok(if compact_flag { compact(&value) } else { value })
     }
 
     async fn tool_list_comments(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let task_id = req_i64(args, "taskId")?;
-        let limit = arg_i64(args, "limit").unwrap_or(50).clamp(1, 100);
-        let offset = arg_i64(args, "offset").unwrap_or(0).max(0);
-        let query = vec![
-            ("limit".to_string(), limit.to_string()),
-            ("offset".to_string(), offset.to_string()),
-        ];
-        self.client
-            .call(
-                "GET",
-                &format!("/tm/tasks/{task_id}/comments"),
-                &query,
-                None,
-            )
-            .await
-            .map_err(|e| e.to_string())
+        let compact_flag = arg_bool(args, "compact").unwrap_or(false);
+        let value = if arg_bool(args, "fetchAll").unwrap_or(false) {
+            self.comments_all_pages(task_id, args).await?
+        } else {
+            let limit = arg_i64(args, "limit").unwrap_or(50).clamp(1, 100);
+            let offset = arg_i64(args, "offset").unwrap_or(0).max(0);
+            let query = vec![
+                ("limit".to_string(), limit.to_string()),
+                ("offset".to_string(), offset.to_string()),
+            ];
+            self.client
+                .call(
+                    "GET",
+                    &format!("/tm/tasks/{task_id}/comments"),
+                    &query,
+                    None,
+                )
+                .await
+                .map_err(|e| e.to_string())?
+        };
+        Ok(if compact_flag { compact(&value) } else { value })
+    }
+
+    /// Постраничный сбор комментариев. Если API не отдаёт `hasMore`, страница
+    /// считается последней, когда вернулось меньше запрошенного `limit`.
+    async fn comments_all_pages(
+        &self,
+        task_id: i64,
+        args: &Map<String, Value>,
+    ) -> Result<Value, String> {
+        let limit = arg_i64(args, "limit").unwrap_or(100).clamp(1, 100);
+        let max_items = arg_i64(args, "maxItems").unwrap_or(200).clamp(1, 1000) as usize;
+        let mut offset = arg_i64(args, "offset").unwrap_or(0).max(0);
+        let mut collected: Vec<Value> = Vec::new();
+        let mut truncated = false;
+        let mut page_index = 0;
+        loop {
+            page_index += 1;
+            if page_index > 50 {
+                truncated = true;
+                break;
+            }
+            let query = vec![
+                ("limit".to_string(), limit.to_string()),
+                ("offset".to_string(), offset.to_string()),
+            ];
+            let page = self
+                .client
+                .call(
+                    "GET",
+                    &format!("/tm/tasks/{task_id}/comments"),
+                    &query,
+                    None,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            let comments = extract_list(&page, "comments");
+            let received = comments.len();
+            let mut capped = false;
+            for comment in comments {
+                if collected.len() >= max_items {
+                    capped = true;
+                    break;
+                }
+                collected.push(comment);
+            }
+            if capped {
+                truncated = true;
+                break;
+            }
+            match page.get("hasMore").and_then(Value::as_bool) {
+                Some(true) => {}
+                Some(false) => break,
+                None => {
+                    if received < limit as usize {
+                        break;
+                    }
+                }
+            }
+            if collected.len() >= max_items {
+                truncated = true;
+                break;
+            }
+            offset += limit;
+        }
+        Ok(json!({ "comments": collected, "truncated": truncated }))
     }
 
     async fn tool_download_attachment(&self, args: &Map<String, Value>) -> Result<Value, String> {
