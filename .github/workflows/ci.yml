@@ -23,11 +23,26 @@ jobs:
     steps:
       # actions/checkout@v7.0.1 (запиннено по SHA)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      # dtolnay/rust-toolchain, master (запиннено по SHA из истории master; toolchain задаётся явно)
-      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
+      # Rust stable ставим сами через rustup (он есть на GitHub-hosted образах):
+      # сторонняя action не нужна — нечему устаревать и нечего исключать из Dependabot.
+      # Микро-ретраи: rustup ходит на сервер релизов, транзиентные сбои загрузки бывают.
+      - name: Install Rust (stable)
+        shell: bash
+        run: |
+          command -v rustup >/dev/null || { echo "rustup not found on this runner"; exit 1; }
+          attempt=1
+          while true; do
+            if rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update; then
+              break
+            fi
+            if [ "$attempt" -ge 3 ]; then
+              echo "rustup install failed after 3 attempts"; exit 1
+            fi
+            echo "rustup install failed (attempt $attempt); retry in 20s"
+            sleep 20
+            attempt=$((attempt + 1))
+          done
+          rustup default stable
       # Swatinem/rust-cache@v2 (запиннено по SHA)
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       - run: cargo fmt --check
@@ -54,9 +69,23 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f
-        with:
-          toolchain: stable
+      - name: Install Rust (stable)
+        shell: bash
+        run: |
+          command -v rustup >/dev/null || { echo "rustup not found on this runner"; exit 1; }
+          attempt=1
+          while true; do
+            if rustup toolchain install stable --profile minimal --no-self-update; then
+              break
+            fi
+            if [ "$attempt" -ge 3 ]; then
+              echo "rustup install failed after 3 attempts"; exit 1
+            fi
+            echo "rustup install failed (attempt $attempt); retry in 20s"
+            sleep 20
+            attempt=$((attempt + 1))
+          done
+          rustup default stable
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
       - name: Check release preconditions
         shell: bash
