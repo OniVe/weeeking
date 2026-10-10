@@ -1,5 +1,7 @@
 # Weeeking 🛡️
 
+**Русский** · [English](README.en.md)
+
 [![CI](https://github.com/OniVe/weeeking/actions/workflows/ci.yml/badge.svg)](https://github.com/OniVe/weeeking/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/OniVe/weeeking)](https://github.com/OniVe/weeeking/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -75,6 +77,9 @@ npx -y weeeking     # MCP-сервер по stdio; бинарник скачае
 Пакет `weeeking` — тонкая обёртка: берёт нативный бинарник нужной платформы (Windows x64/arm64,
 Linux x64 gnu/musl, Linux arm64, macOS arm64/x64) из GitHub Releases этой же версии. Публикуется
 через npm trusted publishing (OIDC, с provenance).
+
+Сервер также опубликован в официальном MCP Registry — `io.github.OniVe/weeeking`; оттуда его
+подхватывают каталог GitHub MCP и агрегаторы.
 
 На macOS скачанный через браузер бинарник может ловить карантин Gatekeeper — снимите его
 (`xattr -d com.apple.quarantine <файл>`) или ставьте через `npx`/`curl`.
