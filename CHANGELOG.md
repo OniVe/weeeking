@@ -2,7 +2,13 @@
 
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/), версионирование — [SemVer](https://semver.org/lang/ru/).
 
-## [Unreleased]
+## [0.4.1] — 2026-10-10
+
+### Добавлено
+
+- Публикация в официальный MCP Registry (`registry.modelcontextprotocol.io`) из CI через GitHub OIDC:
+  npm-пакет получил поле `mcpName`, в репозитории добавлен `server.json`; запись обновляется
+  автоматически при выходе релиза и видна MCP-клиентам (VS Code, Copilot и др. — через каталог GitHub).
 
 ### Изменено
 
@@ -12,6 +18,12 @@
 - Preconditions релиза сверяют версию `npm/package.json` с Cargo-версией (раньше рассинхрон ловил
   только npm-пайплайн после публикации релиза).
 - Бюджет ожидания публикации npm увеличен до 60 минут (холодные сборки семи платформ).
+
+### Исправлено
+
+- README и справка CLI: убраны устаревшие формулировки («пилот»), платформы и токен на Linux/macOS
+  описаны актуально (только переменные окружения), примеры OpenCode переведены на нативную V2-форму
+  (`mcp.servers`), сообщение `store-token` на не-Windows уточнено (Linux и macOS).
 
 ## [0.4.0] — 2026-10-09
 
@@ -99,6 +111,7 @@
 - Булевы query-параметры (например, `completed`) уходят в Weeek как `1/0`: вариант `true/false`
   API отклоняет с HTTP 422. Найдено приёмочным smoke-тестом перед релизом.
 
+[0.4.1]: https://github.com/OniVe/weeeking/releases/tag/v0.4.1
 [0.4.0]: https://github.com/OniVe/weeeking/releases/tag/v0.4.0
 [0.3.0]: https://github.com/OniVe/weeeking/releases/tag/v0.3.0
 [0.2.0]: https://github.com/OniVe/weeeking/releases/tag/v0.2.0

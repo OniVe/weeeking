@@ -6,7 +6,7 @@
 
 > *Weeek and conquer.* MCP-сервер для [Weeek](https://weeek.net) с **полным покрытием публичного API**:
 > 157 операций из официальной OpenAPI-спецификации. Один бинарник на Rust, без Node и внешних зависимостей
-> в рантайме. Целевые платформы пилота: **Windows x86_64 и Linux x86_64**.
+> в рантайме. Релизы — для семи платформ: **Windows x64/arm64, Linux x64 (glibc/musl), Linux arm64, macOS arm64/x64**.
 
 ## Возможности
 
@@ -35,7 +35,7 @@
 
 ```bash
 cargo build --release
-# → target/release/weeeking.exe (Windows) / target/release/weeeking (Linux)
+# → target/release/weeeking.exe (Windows) / target/release/weeeking (Linux, macOS)
 ```
 
 ## Релизы
@@ -98,11 +98,12 @@ Linux x64 gnu/musl, Linux arm64, macOS arm64/x64) из GitHub Releases этой 
 ### Откуда берётся токен
 
 1. `WEEEK_API_TOKEN` (или `WEEEK_TOKEN`) из окружения — приоритет всегда за ним.
-2. На Windows — запись **`weeek-mcp` / `WEEEK_KEYCHAIN_ACCOUNT`** (по умолчанию `api-token`) в Windows Credential
+2. На Windows — запись сервиса `weeek-mcp` с именем **`WEEEK_KEYCHAIN_ACCOUNT`** (по умолчанию `api-token`;
+   в диспетчере учётных данных target — `api-token.weeek-mcp`) в Windows Credential
    Manager (сохраняется командой `weeeking store-token`). Значение никогда не логируется.
 3. Если пусто — сервер поднимается, но вызовы возвращают `isError` с подсказкой.
 
-На Linux пилота токен задаётся переменной `WEEEK_API_TOKEN` (Secret Service можно добавить позже — `src/token.rs`).
+На **Linux и macOS** токен задаётся переменными окружения `WEEEK_API_TOKEN` или `WEEEK_TOKEN` — системное хранилище на этих платформах пока не поддерживается.
 
 ### Несколько аккаунтов Weeek
 
@@ -110,30 +111,35 @@ Linux x64 gnu/musl, Linux arm64, macOS arm64/x64) из GitHub Releases этой 
 Для второго пользователя нужен **его собственный токен** (создаётся в Настройках workspace → API; доступ к разделу
 есть у супер-админов и админов).
 
-```bash
+```powershell
 # 1) Сохранить токен второго аккаунта (ввод скрыт, в argv токен не попадает)
 weeeking store-token --account api-token-anna
 
-# 2) Инстанс сервера с этим аккаунтом — через переменную окружения
-WEEEK_KEYCHAIN_ACCOUNT=api-token-anna weeeking
+# 2) Запуск сервера под этим аккаунтом в PowerShell
+$env:WEEEK_KEYCHAIN_ACCOUNT = "api-token-anna"; weeeking
 ```
 
-Пример второго инстанса в конфиге OpenCode:
+Пример второго инстанса в конфиге OpenCode (нативная форма V2):
 
 ```jsonc
-"weeek-anna": {
-  "type": "local",
-  "command": ["C:\\путь\\weeeking.exe"],
-  "enabled": true,
-  "environment": {
-    "WEEEK_KEYCHAIN_ACCOUNT": "api-token-anna",
-    "READ_ONLY": "false"
+"mcp": {
+  "servers": {
+    "weeek-anna": {
+      "type": "local",
+      "command": ["C:\\путь\\weeeking.exe"],
+      "environment": {
+        "WEEEK_KEYCHAIN_ACCOUNT": "api-token-anna",
+        "READ_ONLY": "false"
+      }
+    }
   }
 }
 ```
 
 Агент сможет выбирать, от кого действовать: тулы `weeek-anna_*` пишут от Анны, `weeek_*` — от основного аккаунта.
 Удалить запись из хранилища: `cmdkey /delete:api-token-anna.weeek-mcp`.
+
+На Linux и macOS мультиаккаунт — отдельный инстанс сервера с собственным `WEEEK_API_TOKEN` в окружении.
 
 ### CLI
 
@@ -145,19 +151,25 @@ weeeking --help                         справка
 
 ## Подключение (OpenCode)
 
+Нативная форма OpenCode V2 — серверы живут в `mcp.servers`:
+
 ```jsonc
-"weeek": {
-  "type": "local",
-  "command": ["C:\\путь\\weeeking.exe"],
-  "enabled": true,
-  "environment": { "READ_ONLY": "false" }
+"mcp": {
+  "servers": {
+    "weeek": {
+      "type": "local",
+      "command": ["C:\\путь\\weeeking.exe"],   // на любой ОС: ["npx", "-y", "weeeking"]
+      "environment": { "READ_ONLY": "false" }
+    }
+  }
 }
 ```
 
-Любой другой MCP-клиент: команда — путь к бинарнику, транспорт — stdio.
+Добавить из CLI: `opencode mcp add weeek -- npx -y weeeking` (с `--global` — для всех проектов).
+Отключить сервер, не удаляя из конфига: `"disabled": true` (нативная V2-форма; V1-форма
+`"mcp": { "weeek": { … } }` с `enabled` тоже поддерживается).
 
-> Форма записи выше — V1-совместимая (проверена на OpenCode 2.0.24). Native V2-форма
-> (`"mcp": { "servers": { … } }`, `"disabled": false`) поддерживается наравне.
+Любой другой MCP-клиент: команда — путь к бинарнику (или `npx -y weeeking`), транспорт — stdio.
 
 ## Обновление спецификации
 

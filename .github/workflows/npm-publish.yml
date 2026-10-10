@@ -21,6 +21,15 @@ jobs:
     steps:
       # actions/checkout@v7.0.1 (запиннено по SHA)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # Релиз (npm + MCP Registry) запускается только с тега: dispatch на ветке — красный,
+      # а не «тихий зелёный», чтобы ручной ретрай всегда делался на refs/tags/vX.
+      - name: Require a tag ref
+        shell: bash
+        run: |
+          case "${GITHUB_REF}" in
+            refs/tags/v*) ;;
+            *) echo "this workflow publishes only tag refs (npm and MCP Registry); got ${GITHUB_REF}"; exit 1 ;;
+          esac
       # actions/setup-node@v7.1.0 (запиннено по SHA)
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -87,3 +96,108 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v') && steps.registry.outputs.already == 'false'
         working-directory: npm
         run: npm publish
+      # --- MCP Registry (registry.modelcontextprotocol.io), только на теге ---
+      - name: Wait for npm metadata (mcpName)
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          want="io.github.OniVe/weeeking"
+          for attempt in $(seq 1 90); do
+            code=$(curl -s -o npm-version.json -w '%{http_code}' "https://registry.npmjs.org/weeeking/${version}" || true)
+            case "${code}" in
+              200)
+                mcp=$(python3 -c 'import json; print(json.load(open("npm-version.json")).get("mcpName", ""))')
+                if [ "${mcp}" = "${want}" ]; then
+                  echo "npm ${version} exposes mcpName=${mcp}"; exit 0
+                fi
+                echo "npm ${version} is visible, mcpName='${mcp}' (want '${want}')" ;;
+              404) ;; # версии ещё нет — ждём
+              *) echo "unexpected HTTP ${code} from the npm registry"; exit 1 ;;
+            esac
+            echo "waiting for npm ${version} with mcpName (attempt ${attempt}/90)"
+            sleep 10
+          done
+          echo "npm ${version} did not expose mcpName in time"; exit 1
+      - name: Verify server.json matches the tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          file_version=$(python3 -c 'import json; print(json.load(open("server.json"))["version"])')
+          pkg_version=$(python3 -c 'import json; print(json.load(open("server.json"))["packages"][0]["version"])')
+          if [ "${file_version}" != "${version}" ] || [ "${pkg_version}" != "${version}" ]; then
+            echo "server.json versions (${file_version}, ${pkg_version}) do not match ${version}; bump server.json"; exit 1
+          fi
+          echo "server.json versions match ${version}"
+      - name: Publish to the MCP Registry (OIDC)
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          name="io.github.OniVe/weeeking"
+          api="https://registry.modelcontextprotocol.io/v0.1/servers/io.github.OniVe%2Fweeeking/versions"
+          # mcp-publisher пинится по версии; sha256 получен из cosign-проверенного релиза v1.8.1
+          # (cosign verify-blob, identity release.yml@refs/tags/v1.8.1) — обновлять вместе с пином.
+          publisher_version="v1.8.1"
+          publisher_sha256="a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc"
+
+          registry_state() {
+            # Печатает "has"/"absent"; любой сбой разбора ответа — ненулевой код (fail-closed).
+            python3 -c 'import json,sys; d=json.load(open("registry-versions.json")); s=d.get("servers"); assert isinstance(s, list) and all(isinstance(e, dict) for e in s); print("has" if sys.argv[1] in [e.get("server", {}).get("version") for e in s] else "absent")' "$1"
+          }
+
+          # Пре-чек: 404 = сервер ещё не публиковался (продолжаем); 200 = "has" → skip,
+          # "absent" → публикуем; непарсимый ответ/иной HTTP — fail-closed.
+          code=$(curl -s -o registry-versions.json -w '%{http_code}' "${api}" || true)
+          if [ "${code}" = "200" ]; then
+            if state=$(registry_state "${version}"); then
+              case "${state}" in
+                has) echo "MCP Registry already has ${name}@${version}; nothing to publish"; exit 0 ;;
+                absent) : ;; # версии нет — публикуем
+                *) echo "unexpected registry state '${state}'"; exit 1 ;;
+              esac
+            else
+              echo "cannot parse the MCP Registry response"; exit 1
+            fi
+          elif [ "${code}" != "404" ]; then
+            echo "unexpected HTTP ${code} from the MCP Registry"; exit 1
+          fi
+
+          curl -sfL -o mcp-publisher.tar.gz "https://github.com/modelcontextprotocol/registry/releases/download/${publisher_version}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${publisher_sha256}  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+
+          ./mcp-publisher login github-oidc
+          if ! ./mcp-publisher publish >publish.log 2>&1; then
+            cat publish.log
+            if grep -q "already exists" publish.log; then
+              code=$(curl -s -o registry-versions.json -w '%{http_code}' "${api}" || true)
+              if [ "${code}" = "200" ]; then
+                if state=$(registry_state "${version}") && [ "${state}" = "has" ]; then
+                  echo "duplicate version confirmed in the registry; treating as success"; exit 0
+                fi
+              fi
+            fi
+            exit 1
+          fi
+          cat publish.log
+      - name: Verify the registry entry
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          api="https://registry.modelcontextprotocol.io/v0.1/servers/io.github.OniVe%2Fweeeking/versions"
+          registry_state() {
+            # Печатает "has"/"absent"; любой сбой разбора ответа — ненулевой код (fail-closed).
+            python3 -c 'import json,sys; d=json.load(open("registry-versions.json")); s=d.get("servers"); assert isinstance(s, list) and all(isinstance(e, dict) for e in s); print("has" if sys.argv[1] in [e.get("server", {}).get("version") for e in s] else "absent")' "$1"
+          }
+          for attempt in $(seq 1 6); do
+            code=$(curl -s -o registry-versions.json -w '%{http_code}' "${api}" || true)
+            if [ "${code}" = "200" ] && state=$(registry_state "${version}") && [ "${state}" = "has" ]; then
+              echo "MCP Registry entry confirmed: io.github.OniVe/weeeking@${version}"; exit 0
+            fi
+            echo "waiting for the registry entry (attempt ${attempt}/6)"
+            sleep 10
+          done
+          echo "MCP Registry entry did not appear in time"; exit 1

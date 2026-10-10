@@ -1,0 +1,65 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.OniVe/weeeking",
+  "title": "Weeeking",
+  "description": "MCP server for Weeek with full public API coverage: tasks, projects, CRM, time tracking.",
+  "repository": {
+    "url": "https://github.com/OniVe/weeeking",
+    "source": "github"
+  },
+  "version": "0.4.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "weeeking",
+      "version": "0.4.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "WEEEK_API_TOKEN",
+          "description": "Weeek API token (Weeek: Settings → API). Alternative: `weeeking store-token` on Windows.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "WEEEK_TOKEN",
+          "description": "Alias for WEEEK_API_TOKEN (checked second).",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "READ_ONLY",
+          "description": "true (default) — read-only mode: write tools are hidden. Set false to allow changes.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "WEEEK_BASE_URL",
+          "description": "Custom API base URL (proxy or self-hosted gateway).",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "WEEEK_DISABLE_KEYCHAIN",
+          "description": "1 — do not read the token from the OS keychain (Windows Credential Manager).",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "WEEEK_MAX_RESPONSE_CHARS",
+          "description": "Maximum response size in characters (default 60000).",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "WEEEK_LOG",
+          "description": "debug — verbose HTTP logs to stderr (no token).",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}

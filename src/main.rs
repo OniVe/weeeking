@@ -20,7 +20,8 @@ fn print_usage() {
          \x20 weeeking --help                         эта справка\n\
          \n\
          Токен ищется в порядке: WEEEK_API_TOKEN / WEEEK_TOKEN → системное хранилище\n\
-         (запись `weeek-mcp`, имя аккаунта из WEEEK_KEYCHAIN_ACCOUNT, по умолчанию `api-token`).\n\
+         (Windows Credential Manager: запись `weeek-mcp`, имя аккаунта из WEEEK_KEYCHAIN_ACCOUNT,\n\
+         по умолчанию `api-token`).\n\
          \n\
          Основные переменные: READ_ONLY=true|false, WEEEK_BASE_URL, WEEEK_TIMEOUT_MS,\n\
          WEEEK_MAX_RESPONSE_CHARS, WEEEK_DISABLE_KEYCHAIN=1, WEEEK_KEYCHAIN_ACCOUNT."

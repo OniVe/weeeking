@@ -1,6 +1,6 @@
 [package]
 name = "weeeking"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 description = "Weeeking — MCP server for Weeek with full public API coverage (generated from the official OpenAPI). Weeek and conquer."
 license = "MIT"

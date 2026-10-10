@@ -56,8 +56,9 @@ fn read_keychain(account: &str) -> Option<String> {
 
 #[cfg(not(windows))]
 fn read_keychain(_account: &str) -> Option<String> {
-    // Linux pilot gets its token from WEEEK_API_TOKEN; a Secret Service
-    // integration can be added later without touching the server core.
+    // On non-Windows platforms the token comes from WEEEK_API_TOKEN / WEEEK_TOKEN;
+    // Secret Service (Linux) and Keychain (macOS) integrations can be added later
+    // without touching the server core.
     None
 }
 
@@ -105,7 +106,7 @@ pub fn store_token(account: &str) -> anyhow::Result<()> {
 pub fn store_token(_account: &str) -> anyhow::Result<()> {
     anyhow::bail!(
         "store-token пока поддержан только на Windows (Credential Manager); \
-         на Linux задайте токен через WEEEK_API_TOKEN."
+         на Linux и macOS задайте токен через WEEEK_API_TOKEN или WEEEK_TOKEN."
     )
 }
 
