@@ -1,17 +1,15 @@
-## [0.4.1](https://github.com/OniVe/weeeking/compare/v0.4.0...v0.4.1)
+## [0.5.0](https://github.com/OniVe/weeeking/compare/v0.4.1...v0.5.0)
 
-Патч-релиз: сервер публикуется в официальном MCP Registry и становится виден MCP-клиентам
-(VS Code, Copilot и др. — через каталог GitHub MCP).
+Минорный релиз: сервер и CLI говорят на двух языках, документация — тоже.
 
 **Что нового**
 
-- **Официальный MCP Registry**: запись `io.github.OniVe/weeeking` — обновляется автоматически на каждый
-  релиз (npm-пакет с полем `mcpName` + `server.json`, публикация из CI через GitHub OIDC, без секретов)
-- **Системное хранилище токена на всех платформах**: macOS Keychain и Linux Secret Service
-  (GNOME Keyring/KWallet) в дополнение к Windows Credential Manager — `weeeking store-token` больше
-  не Windows-only
-- README: убраны устаревшие формулировки, актуальные платформы (семь), нативная форма конфигурации
-  OpenCode V2 (`mcp.servers`)
+- **`WEEEK_LANG=ru|en`** — язык всех пользовательских текстов: справка CLI, описания инструментов и их
+  полей, инструкции сервера, промпты, ресурсы и сообщения об ошибках (по умолчанию — русский;
+  `en` включает английские тексты)
+- **Английский README** (`README.en.md`) и переключатель языка в обоих README
+- Идентификаторы и summary операций в описаниях групп приходят из OpenAPI-спеки Weeek и остаются
+  английскими; технические HTTP-логи (`WEEEK_LOG=debug`) — тоже
 
 **Установка**
 
