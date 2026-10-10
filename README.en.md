@@ -91,6 +91,7 @@ A binary downloaded through a browser on macOS may be quarantined by Gatekeeper 
 | --- | --- | --- |
 | `WEEEK_API_TOKEN` | — | Weeek API token (workspace Settings → API). Reads are impossible without it. |
 | `READ_ONLY` | `true` | `false`/`0` — enable mutating operations (create, update, delete, CRM). |
+| `WEEEK_LANG` | `ru` | Language of user-facing texts (`ru`/`en`): help, tool descriptions, prompts, errors. |
 | `WEEEK_BASE_URL` | `https://api.weeek.net/public/v1` | Custom proxy/host if needed. |
 | `WEEEK_TIMEOUT_MS` | `30000` | Request timeout. |
 | `WEEEK_MAX_RESPONSE_CHARS` | `60000` | Truncation limit for large responses. |

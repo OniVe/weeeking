@@ -1,4 +1,5 @@
 use crate::http::WeeekClient;
+use crate::i18n::{t, tf};
 use crate::server::WeeekingServer;
 use crate::spec::{GROUPS, OpDef, ParamDef, find_operation};
 use crate::util::*;
@@ -28,8 +29,9 @@ pub fn build(read_only: bool) -> (Vec<Tool>, HashMap<String, Vec<String>>) {
         }
         let hidden = all.len() - ops.len();
 
-        let mut description = format!(
+        let mut description = tf!(
             "Операции Weeek ({}) через параметр action.\nparams — плоский объект параметров выбранной операции (path/query/body по именам из списка):\n",
+            "Weeek operations ({}) via the action parameter.\nparams is a flat object of the selected operation's parameters (path/query/body by the names listed below):\n",
             group.label
         );
         for op in &ops {
@@ -37,8 +39,9 @@ pub fn build(read_only: bool) -> (Vec<Tool>, HashMap<String, Vec<String>>) {
             description.push('\n');
         }
         if hidden > 0 {
-            description.push_str(&format!(
-                "(Режим READ_ONLY: скрыто изменяющих операций — {hidden}. Включите READ_ONLY=false, чтобы они появились.)"
+            description.push_str(&tf!(
+                "(Режим READ_ONLY: скрыто изменяющих операций — {hidden}. Включите READ_ONLY=false, чтобы они появились.)",
+                "(READ_ONLY mode: {hidden} mutating operations are hidden. Set READ_ONLY=false to expose them.)"
             ));
         }
 
@@ -48,12 +51,15 @@ pub fn build(read_only: bool) -> (Vec<Tool>, HashMap<String, Vec<String>>) {
                 "action": {
                     "type": "string",
                     "enum": action_ids,
-                    "description": "Операция Weeek API"
+                    "description": t!("Операция Weeek API", "Weeek API operation")
                 },
                 "params": {
                     "type": "object",
                     "additionalProperties": true,
-                    "description": "Параметры операции (см. список в описании)"
+                    "description": t!(
+                        "Параметры операции (см. список в описании)",
+                        "Operation parameters (see the list in the description)"
+                    )
                 }
             }),
             &["action"],
@@ -86,7 +92,11 @@ fn describe_op(op: &OpDef) -> String {
             "{} (path, {}{})",
             p.name,
             p.ty,
-            if p.required { ", обяз." } else { "" }
+            if p.required {
+                t!(", обяз.", ", required")
+            } else {
+                ""
+            }
         ));
     }
     for q in op.query_params {
@@ -99,7 +109,11 @@ fn describe_op(op: &OpDef) -> String {
             q.name,
             q.ty,
             enum_hint,
-            if q.required { ", обяз." } else { "" }
+            if q.required {
+                t!(", обяз.", ", required")
+            } else {
+                ""
+            }
         ));
     }
     for b in op.body_fields {
@@ -121,7 +135,10 @@ fn describe_op(op: &OpDef) -> String {
         line.push_str(" — ");
         line.push_str(&parts.join("; "));
     } else if op.has_body {
-        line.push_str(" — тело запроса свободной формы");
+        line.push_str(t!(
+            " — тело запроса свободной формы",
+            " — free-form request body"
+        ));
     }
     line
 }
@@ -132,15 +149,25 @@ impl WeeekingServer {
         allowed: &[String],
         args: Map<String, Value>,
     ) -> Result<Value, String> {
-        let action =
-            arg_str(&args, "action").ok_or_else(|| "Не задан параметр «action».".to_string())?;
+        let action = arg_str(&args, "action").ok_or_else(|| {
+            t!(
+                "Не задан параметр «action».",
+                "Missing the `action` parameter."
+            )
+            .to_string()
+        })?;
         if !allowed.iter().any(|id| id == &action) {
-            return Err(format!(
-                "Операция «{action}» недоступна (проверьте список action в описании инструмента и режим READ_ONLY)."
+            return Err(tf!(
+                "Операция «{action}» недоступна (проверьте список action в описании инструмента и режим READ_ONLY).",
+                "Operation `{action}` is not available (check the action list in the tool description and the READ_ONLY mode)."
             ));
         }
-        let op =
-            find_operation(&action).ok_or_else(|| format!("Неизвестная операция: {action}"))?;
+        let op = find_operation(&action).ok_or_else(|| {
+            tf!(
+                "Неизвестная операция: {action}",
+                "Unknown operation: {action}"
+            )
+        })?;
         let params = args
             .get("params")
             .and_then(Value::as_object)
@@ -163,16 +190,24 @@ async fn run_op(
             Some(value) if !value.is_null() => {
                 used.insert(param.name.to_string());
                 validate_path_param(param, value)
-                    .map_err(|e| format!("{e} (операция {})", op.id))?;
-                let encoded = encode_path_segment(&scalar_string(value))
-                    .map_err(|e| format!("{e} (параметр «{}», операция {})", param.name, op.id))?;
+                    .map_err(|e| tf!("{e} (операция {})", "{e} (operation {})", op.id))?;
+                let encoded = encode_path_segment(&scalar_string(value)).map_err(|e| {
+                    tf!(
+                        "{e} (параметр «{}», операция {})",
+                        "{e} (parameter `{}`, operation {})",
+                        param.name,
+                        op.id
+                    )
+                })?;
                 path = path.replace(&format!("{{{}}}", param.name), &encoded);
             }
             _ => {
                 if param.required {
-                    return Err(format!(
+                    return Err(tf!(
                         "Не задан обязательный path-параметр «{}» для {}.",
-                        param.name, op.id
+                        "Missing required path parameter `{}` for {}.",
+                        param.name,
+                        op.id
                     ));
                 }
             }
@@ -184,9 +219,11 @@ async fn run_op(
         match params.get(param.name) {
             None | Some(Value::Null) => {
                 if param.required {
-                    return Err(format!(
+                    return Err(tf!(
                         "Не задан обязательный query-параметр «{}» для {}.",
-                        param.name, op.id
+                        "Missing required query parameter `{}` for {}.",
+                        param.name,
+                        op.id
                     ));
                 }
                 if params.contains_key(param.name) {
@@ -197,7 +234,7 @@ async fn run_op(
             }
             Some(value) => {
                 validate_param_type(param, value)
-                    .map_err(|e| format!("{e} (операция {})", op.id))?;
+                    .map_err(|e| tf!("{e} (операция {})", "{e} (operation {})", op.id))?;
                 push_query(&mut query, param.name, value);
                 used.insert(param.name.to_string());
             }
@@ -210,16 +247,18 @@ async fn run_op(
             match params.get(field.name) {
                 None | Some(Value::Null) => {
                     if field.required {
-                        return Err(format!(
+                        return Err(tf!(
                             "Не задан обязательный параметр «{}» (body) для {}.",
-                            field.name, op.id
+                            "Missing required parameter `{}` (body) for {}.",
+                            field.name,
+                            op.id
                         ));
                     }
                 }
                 Some(value) => {
                     // null в body проходит насквозь (семантика «очистить»), типы — проверяем.
                     validate_param_type(field, value)
-                        .map_err(|e| format!("{e} (операция {})", op.id))?;
+                        .map_err(|e| tf!("{e} (операция {})", "{e} (operation {})", op.id))?;
                 }
             }
         }
@@ -232,8 +271,9 @@ async fn run_op(
         Some(Value::Object(map))
     } else {
         if !extras.is_empty() {
-            return Err(format!(
+            return Err(tf!(
                 "Операция {} не принимает параметры: {}.",
+                "Operation {} does not accept parameters: {}.",
                 op.id,
                 extras
                     .iter()
@@ -270,9 +310,11 @@ fn validate_param_type(param: &ParamDef, value: &Value) -> Result<(), String> {
     if ok {
         Ok(())
     } else {
-        Err(format!(
+        Err(tf!(
             "Параметр «{}» ожидает тип «{}».",
-            param.name, param.ty
+            "Parameter `{}` expects the type `{}`.",
+            param.name,
+            param.ty
         ))
     }
 }
@@ -284,8 +326,9 @@ fn validate_path_param(param: &ParamDef, value: &Value) -> Result<(), String> {
         if value.is_string() || value.is_i64() || value.is_u64() {
             Ok(())
         } else {
-            Err(format!(
+            Err(tf!(
                 "Параметр «{}» ожидает строку или целое число.",
+                "Parameter `{}` expects a string or an integer.",
                 param.name
             ))
         }

@@ -1,6 +1,7 @@
 use crate::curated;
 use crate::generated;
 use crate::http::WeeekClient;
+use crate::i18n::{t, tf};
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, GetPromptRequestParams,
     GetPromptResponse, GetPromptResult, Implementation, ListPromptsResult, ListResourcesResult,
@@ -50,7 +51,10 @@ impl WeeekingServer {
                 Err(message) => crate::util::error_result(message),
             };
         }
-        crate::util::error_result(format!("Неизвестный инструмент: {name}"))
+        crate::util::error_result(tf!(
+            "Неизвестный инструмент: {name}",
+            "Unknown tool: {name}"
+        ))
     }
 }
 
@@ -64,10 +68,12 @@ impl ServerHandler for WeeekingServer {
                 .build(),
         )
         .with_server_info(Implementation::new("weeeking", env!("CARGO_PKG_VERSION")))
-        .with_instructions(
+        .with_instructions(t!(
             "Weeeking — полный API Weeek (задачи, проекты, доски, CRM, время, поля). Начните с weeek_context. \
              Контекст доступен и как ресурсы: weeek://me, weeek://projects.",
-        )
+            "Weeeking — the full Weeek API (tasks, projects, boards, CRM, time, fields). Start with weeek_context. \
+             The context is also available as resources: weeek://me, weeek://projects."
+        ))
     }
 
     async fn list_tools(
@@ -94,12 +100,18 @@ impl ServerHandler for WeeekingServer {
     ) -> Result<ListResourcesResult, McpError> {
         Ok(ListResourcesResult::with_all_items(vec![
             Resource::new("weeek://me", "me")
-                .with_title("Пользователь")
-                .with_description("Текущий пользователь Weeek (user из weeek_context)")
+                .with_title(t!("Пользователь", "User"))
+                .with_description(t!(
+                    "Текущий пользователь Weeek (user из weeek_context)",
+                    "Current Weeek user (user from weeek_context)"
+                ))
                 .with_mime_type("application/json"),
             Resource::new("weeek://projects", "projects")
-                .with_title("Проекты")
-                .with_description("Проекты воркспейса (projects из weeek_context)")
+                .with_title(t!("Проекты", "Projects"))
+                .with_description(t!(
+                    "Проекты воркспейса (projects из weeek_context)",
+                    "Workspace projects (projects from weeek_context)"
+                ))
                 .with_mime_type("application/json"),
         ]))
     }
@@ -120,7 +132,7 @@ impl ServerHandler for WeeekingServer {
                 .map(|context| context.get("projects").cloned().unwrap_or(Value::Null)),
             other => {
                 return Err(McpError::invalid_params(
-                    format!("Неизвестный ресурс: {other}"),
+                    tf!("Неизвестный ресурс: {other}", "Unknown resource: {other}"),
                     None,
                 ));
             }
@@ -145,16 +157,22 @@ impl ServerHandler for WeeekingServer {
         Ok(ListPromptsResult::with_all_items(vec![
             Prompt::new(
                 "my-tasks-today",
-                Some("Мои задачи на сегодня: собрать и предложить план дня"),
+                Some(t!(
+                    "Мои задачи на сегодня: собрать и предложить план дня",
+                    "My tasks today: gather them and propose a plan for the day"
+                )),
                 None,
             )
-            .with_title("Мои задачи на сегодня"),
+            .with_title(t!("Мои задачи на сегодня", "My tasks today")),
             Prompt::new(
                 "week-review",
-                Some("Итоги недели: завершённое, обсуждения, дедлайны"),
+                Some(t!(
+                    "Итоги недели: завершённое, обсуждения, дедлайны",
+                    "Week review: completed work, discussions, deadlines"
+                )),
                 None,
             )
-            .with_title("Итоги недели"),
+            .with_title(t!("Итоги недели", "Week review")),
         ]))
     }
 
@@ -164,11 +182,11 @@ impl ServerHandler for WeeekingServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<GetPromptResponse, McpError> {
         let text = match request.name.as_str() {
-            "my-tasks-today" => MY_TASKS_TODAY,
-            "week-review" => WEEK_REVIEW,
+            "my-tasks-today" => t!(MY_TASKS_TODAY_RU, MY_TASKS_TODAY_EN),
+            "week-review" => t!(WEEK_REVIEW_RU, WEEK_REVIEW_EN),
             other => {
                 return Err(McpError::invalid_params(
-                    format!("Неизвестный промпт: {other}"),
+                    tf!("Неизвестный промпт: {other}", "Unknown prompt: {other}"),
                     None,
                 ));
             }
@@ -177,10 +195,18 @@ impl ServerHandler for WeeekingServer {
     }
 }
 
-const MY_TASKS_TODAY: &str = "Собери мои задачи на сегодня: вызови weeek_context, возьми своё id из me, затем \
+const MY_TASKS_TODAY_RU: &str = "Собери мои задачи на сегодня: вызови weeek_context, возьми своё id из me, затем \
 weeek_search_tasks с userId=<id> и day=<сегодняшняя дата клиента>. Сгруппируй по проектам, отметь просроченные \
 и в конце предложи план: что взять в работу.";
 
-const WEEK_REVIEW: &str = "Подготовь итоги недели: завершённые задачи за последние 7 дней (weeek_search_tasks: \
+const MY_TASKS_TODAY_EN: &str = "Collect my tasks for today: call weeek_context, take your id from me, then \
+weeek_search_tasks with userId=<id> and day=<the client's current date>. Group them by project, mark overdue ones, \
+and finish with a plan: what to start working on.";
+
+const WEEK_REVIEW_RU: &str = "Подготовь итоги недели: завершённые задачи за последние 7 дней (weeek_search_tasks: \
 completed=true, completedAtFrom/completedAtTo), самые обсуждаемые задачи (комментарии), дедлайны следующей недели. \
 Дай сводку по проектам и 3–5 коротких выводов.";
+
+const WEEK_REVIEW_EN: &str = "Prepare a week review: tasks completed in the last 7 days (weeek_search_tasks: \
+completed=true, completedAtFrom/completedAtTo), the most discussed tasks (comments), and next week's deadlines. \
+Give a per-project summary and 3–5 short takeaways.";

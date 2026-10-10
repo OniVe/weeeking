@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::i18n::{t, tf};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
@@ -35,29 +36,57 @@ fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
 
 fn cap_error_body(mut body: String) -> String {
     if body.chars().count() > ERROR_BODY_MAX_CHARS {
-        body = body.chars().take(ERROR_BODY_MAX_CHARS).collect::<String>() + "…[обрезано]";
+        body = body.chars().take(ERROR_BODY_MAX_CHARS).collect::<String>()
+            + t!("…[обрезано]", "…[truncated]");
     }
     body
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum WeeekError {
-    #[error(
-        "WEEEK_API_TOKEN не задан. Создайте токен в Weeek (Настройки workspace → API) и передайте его \
-         в окружении MCP-сервера (WEEEK_API_TOKEN), либо задайте READ_ONLY=true только для чтения."
-    )]
     Token,
-    #[error("Ошибка Weeek API (HTTP {status}): {body}")]
-    Api { status: u16, body: String },
-    #[error("Сетевая ошибка или таймаут ({method} {path}): {message}")]
+    Api {
+        status: u16,
+        body: String,
+    },
     Network {
         method: String,
         path: String,
         message: String,
     },
-    #[error("Файловая ошибка: {0}")]
     Io(String),
 }
+
+impl std::fmt::Display for WeeekError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WeeekError::Token => f.write_str(t!(
+                "WEEEK_API_TOKEN не задан. Создайте токен в Weeek (Настройки workspace → API) и передайте \
+                 его в окружении MCP-сервера (WEEEK_API_TOKEN), либо задайте READ_ONLY=true только для чтения.",
+                "WEEEK_API_TOKEN is not set. Create a token in Weeek (workspace Settings → API) and pass it \
+                 in the MCP server environment (WEEEK_API_TOKEN), or set READ_ONLY=true for read-only mode."
+            )),
+            WeeekError::Api { status, body } => f.write_str(&tf!(
+                "Ошибка Weeek API (HTTP {status}): {body}",
+                "Weeek API error (HTTP {status}): {body}"
+            )),
+            WeeekError::Network {
+                method,
+                path,
+                message,
+            } => f.write_str(&tf!(
+                "Сетевая ошибка или таймаут ({method} {path}): {message}",
+                "Network error or timeout ({method} {path}): {message}"
+            )),
+            WeeekError::Io(message) => f.write_str(&tf!(
+                "Файловая ошибка: {message}",
+                "File error: {message}"
+            )),
+        }
+    }
+}
+
+impl std::error::Error for WeeekError {}
 
 pub struct WeeekClient {
     http: reqwest::Client,
@@ -288,8 +317,9 @@ impl WeeekClient {
         if let Some(length) = response.content_length()
             && length as usize > max_bytes
         {
-            return Err(WeeekError::Io(format!(
-                "вложение больше лимита ({length} > {max_bytes} байт). Увеличьте WEEEK_MAX_ATTACHMENT_BYTES, если это ожидаемо."
+            return Err(WeeekError::Io(tf!(
+                "вложение больше лимита ({length} > {max_bytes} байт). Увеличьте WEEEK_MAX_ATTACHMENT_BYTES, если это ожидаемо.",
+                "attachment is larger than the limit ({length} > {max_bytes} bytes). Raise WEEEK_MAX_ATTACHMENT_BYTES if this is expected."
             )));
         }
         let mut bytes: Vec<u8> = Vec::new();
@@ -297,8 +327,9 @@ impl WeeekClient {
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(net)?;
             if bytes.len() + chunk.len() > max_bytes {
-                return Err(WeeekError::Io(format!(
-                    "вложение превысило лимит {max_bytes} байт — скачивание остановлено (WEEEK_MAX_ATTACHMENT_BYTES)."
+                return Err(WeeekError::Io(tf!(
+                    "вложение превысило лимит {max_bytes} байт — скачивание остановлено (WEEEK_MAX_ATTACHMENT_BYTES).",
+                    "attachment exceeded the {max_bytes} byte limit — download stopped (WEEEK_MAX_ATTACHMENT_BYTES)."
                 )));
             }
             bytes.extend_from_slice(&chunk);

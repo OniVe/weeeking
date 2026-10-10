@@ -1,3 +1,4 @@
+use crate::i18n::{t, tf};
 use rmcp::model::{CallToolResult, ContentBlock, JsonObject, ToolAnnotations};
 use serde_json::{Map, Value, json};
 use std::sync::Arc;
@@ -17,7 +18,10 @@ pub fn truncate(s: &str, max: usize) -> String {
         return s.to_string();
     }
     let taken: String = s.chars().take(max).collect();
-    format!("{taken}\n…[ответ обрезан: {max} из {total} символов]")
+    tf!(
+        "{taken}\n…[ответ обрезан: {max} из {total} символов]",
+        "{taken}\n…[response truncated: {max} of {total} chars]"
+    )
 }
 
 /// Рекурсивно убирает из JSON `null`, пустые строки, массивы и объекты.
@@ -112,18 +116,26 @@ pub fn arg_str_array(args: &JsonObject, key: &str) -> Option<Vec<String>> {
 
 pub fn req_i64(args: &JsonObject, key: &str) -> Result<i64, String> {
     match args.get(key) {
-        None | Some(Value::Null) => Err(format!("Не задан обязательный параметр «{key}».")),
-        Some(value) => value
-            .as_i64()
-            .filter(|n| *n > 0)
-            .ok_or_else(|| format!("Параметр «{key}» должен быть положительным целым числом.")),
+        None | Some(Value::Null) => Err(tf!(
+            "Не задан обязательный параметр «{key}».",
+            "Missing required parameter `{key}`."
+        )),
+        Some(value) => value.as_i64().filter(|n| *n > 0).ok_or_else(|| {
+            tf!(
+                "Параметр «{key}» должен быть положительным целым числом.",
+                "Parameter `{key}` must be a positive integer."
+            )
+        }),
     }
 }
 
 pub fn req_str(args: &JsonObject, key: &str) -> Result<String, String> {
-    arg_str(args, key)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("Не задан обязательный параметр «{key}» (строка)."))
+    arg_str(args, key).filter(|s| !s.is_empty()).ok_or_else(|| {
+        tf!(
+            "Не задан обязательный параметр «{key}» (строка).",
+            "Missing required parameter `{key}` (string)."
+        )
+    })
 }
 
 /// Adds a query pair, expanding arrays into repeated keys.
@@ -170,11 +182,16 @@ pub fn encode_segment(s: &str) -> String {
 /// на родительский коллекционный endpoint.
 pub fn encode_path_segment(value: &str) -> Result<String, String> {
     if value.trim().is_empty() {
-        return Err("недопустимый path-параметр: пустая строка.".to_string());
+        return Err(t!(
+            "недопустимый path-параметр: пустая строка.",
+            "invalid path parameter: empty string."
+        )
+        .to_string());
     }
     if value == "." || value == ".." {
-        return Err(format!(
-            "недопустимый path-параметр «{value}»: сегменты '.' и '..' запрещены."
+        return Err(tf!(
+            "недопустимый path-параметр «{value}»: сегменты '.' и '..' запрещены.",
+            "invalid path parameter `{value}`: '.' and '..' segments are not allowed."
         ));
     }
     Ok(encode_segment(value))

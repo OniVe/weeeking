@@ -366,6 +366,72 @@ fn attachment_stream_cap_without_content_length() {
 }
 
 #[test]
+fn english_texts_follow_weeek_lang() {
+    // Обрезка большого ответа.
+    let items: Vec<Value> = (0..200)
+        .map(|index| json!({ "id": index, "title": "a".repeat(30) }))
+        .collect();
+    let body = json!({ "tasks": items }).to_string();
+    let server = MockServer::start(vec![Canned::json(&body)]);
+    let mut client = server.client(&[("WEEEK_MAX_RESPONSE_CHARS", "1200"), ("WEEEK_LANG", "en")]);
+
+    let call = client.call_tool("weeek_search_tasks", json!({ "perPage": 50 }));
+    let text = result_text(&call);
+    assert!(
+        text.contains("response truncated"),
+        "en truncation marker: {text}"
+    );
+    assert!(!text.contains("обрезан"), "no Russian leftovers: {text}");
+
+    // Ошибка API и обрезка её тела.
+    let server = MockServer::start(vec![Canned::status_json(500, &"x".repeat(5000))]);
+    let mut client = server.client(&[("WEEEK_LANG", "en")]);
+
+    let call = client.call_tool("weeek_get_task", json!({ "taskId": 1 }));
+    let text = result_text(&call);
+    assert!(
+        text.contains("Weeek API error (HTTP 500)"),
+        "en api error: {text}"
+    );
+    assert!(text.contains("[truncated]"), "en cap marker: {text}");
+    assert!(!text.contains("обрезано"), "no Russian leftovers: {text}");
+
+    // Лимит вложения.
+    let server = MockServer::start(vec![Canned::bytes(vec![b'x'; 3000])]);
+    let mut client = server.client(&[("WEEEK_MAX_ATTACHMENT_BYTES", "1024"), ("WEEEK_LANG", "en")]);
+
+    let call = client.call_tool("weeek_download_attachment", json!({ "fileId": "big" }));
+    assert_eq!(
+        call["isError"], true,
+        "oversized attachment must fail: {call}"
+    );
+    let text = result_text(&call);
+    assert!(
+        text.contains("larger than the limit"),
+        "en attachment limit: {text}"
+    );
+
+    // Сетевая ошибка/таймаут.
+    let server = MockServer::start(vec![Canned {
+        delay_ms: 1500,
+        ..Canned::json("{}")
+    }]);
+    let mut client = server.client(&[("WEEEK_TIMEOUT_MS", "300"), ("WEEEK_LANG", "en")]);
+
+    let call = client.call_tool("weeek_list_comments", json!({ "taskId": 1 }));
+    assert_eq!(call["isError"], true, "timeout must fail: {call}");
+    let text = result_text(&call);
+    assert!(
+        text.contains("Network error or timeout"),
+        "en network error: {text}"
+    );
+    assert!(
+        !text.contains("Сетевая ошибка"),
+        "no Russian leftovers: {text}"
+    );
+}
+
+#[test]
 fn boolean_query_is_serialized_as_bit() {
     // Weeek API принимает булевы query-параметры только как 1/0.
     let server = MockServer::start(vec![

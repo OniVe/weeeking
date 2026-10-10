@@ -23,6 +23,7 @@ impl McpClient {
             .env("WEEEK_API_TOKEN", "")
             .env("WEEEK_TOKEN", "")
             .env("WEEEK_DISABLE_KEYCHAIN", "1")
+            .env("WEEEK_LANG", "ru")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

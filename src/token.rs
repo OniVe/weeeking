@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::i18n::{t, tf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenSource {
@@ -10,9 +11,12 @@ pub enum TokenSource {
 impl TokenSource {
     pub fn describe(&self) -> String {
         match self {
-            TokenSource::Env => "из переменной окружения".to_string(),
-            TokenSource::Keychain(account) => format!("из системного хранилища ({account})"),
-            TokenSource::None => "НЕ НАЙДЕН".to_string(),
+            TokenSource::Env => t!("из переменной окружения", "from the environment").to_string(),
+            TokenSource::Keychain(account) => tf!(
+                "из системного хранилища ({account})",
+                "from the system keychain ({account})"
+            ),
+            TokenSource::None => t!("НЕ НАЙДЕН", "NOT FOUND").to_string(),
         }
     }
 }
@@ -74,35 +78,66 @@ pub fn store_token(account: &str) -> anyhow::Result<()> {
 
     // rpassword читает консольный ввод; без терминала процесс завис бы молча.
     if !std::io::stdin().is_terminal() {
-        bail!(
+        bail!(t!(
             "store-token требует интерактивного терминала (скрытый ввод читается с консоли). \
-             Запустите команду в обычном окне терминала."
-        );
+             Запустите команду в обычном окне терминала.",
+            "store-token requires an interactive terminal (the hidden input is read from the console). \
+             Run the command in a regular terminal window."
+        ));
     }
 
-    let token = rpassword::prompt_password(format!(
-        "Введите токен Weeek для записи «{account}» (ввод скрыт): "
+    let token = rpassword::prompt_password(tf!(
+        "Введите токен Weeek для записи «{account}» (ввод скрыт): ",
+        "Enter the Weeek token for entry `{account}` (input hidden): "
     ))
-    .context("не удалось прочитать ввод")?;
+    .context(t!("не удалось прочитать ввод", "failed to read the input"))?;
     let token = token.trim();
     if token.len() < 20 {
-        bail!("токен подозрительно короткий (меньше 20 символов) — ничего не сохранено.");
+        bail!(t!(
+            "токен подозрительно короткий (меньше 20 символов) — ничего не сохранено.",
+            "the token looks too short (fewer than 20 characters) — nothing was saved."
+        ));
     }
 
-    let entry = keyring::Entry::new("weeek-mcp", account)
-        .with_context(|| format!("нет доступа к системному хранилищу ({KEYCHAIN_LABEL})"))?;
-    entry
-        .set_password(token)
-        .with_context(|| format!("не удалось сохранить токен в хранилище ({KEYCHAIN_LABEL})"))?;
-    let stored = entry
-        .get_password()
-        .with_context(|| format!("токен сохранён, но не читается обратно ({KEYCHAIN_LABEL})"))?;
+    let entry = keyring::Entry::new("weeek-mcp", account).with_context(|| {
+        tf!(
+            "нет доступа к системному хранилищу ({KEYCHAIN_LABEL})",
+            "no access to the system keychain ({KEYCHAIN_LABEL})"
+        )
+    })?;
+    entry.set_password(token).with_context(|| {
+        tf!(
+            "не удалось сохранить токен в хранилище ({KEYCHAIN_LABEL})",
+            "failed to save the token to the keychain ({KEYCHAIN_LABEL})"
+        )
+    })?;
+    let stored = entry.get_password().with_context(|| {
+        tf!(
+            "токен сохранён, но не читается обратно ({KEYCHAIN_LABEL})",
+            "the token was saved but cannot be read back ({KEYCHAIN_LABEL})"
+        )
+    })?;
     if stored.trim() != token {
-        bail!("проверка чтением не прошла — токен сохранён некорректно.");
+        bail!(t!(
+            "проверка чтением не прошла — токен сохранён некорректно.",
+            "the read-back check failed — the token was saved incorrectly."
+        ));
     }
 
-    println!("✓ Токен сохранён: хранилище `weeek-mcp`, запись `{account}` ({KEYCHAIN_LABEL})");
-    println!("  Запуск сервера под этим аккаунтом: WEEEK_KEYCHAIN_ACCOUNT={account}");
+    println!(
+        "{}",
+        tf!(
+            "✓ Токен сохранён: хранилище `weeek-mcp`, запись `{account}` ({KEYCHAIN_LABEL})",
+            "✓ Token saved: service `weeek-mcp`, entry `{account}` ({KEYCHAIN_LABEL})"
+        )
+    );
+    println!(
+        "{}",
+        tf!(
+            "  Запуск сервера под этим аккаунтом: WEEEK_KEYCHAIN_ACCOUNT={account}",
+            "  Run the server as this account: WEEEK_KEYCHAIN_ACCOUNT={account}"
+        )
+    );
     Ok(())
 }
 

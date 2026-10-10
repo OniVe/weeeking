@@ -36,6 +36,12 @@
           "isSecret": false
         },
         {
+          "name": "WEEEK_LANG",
+          "description": "Language of user-facing texts: ru (default) or en — help, tool descriptions, prompts, errors.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
           "name": "WEEEK_BASE_URL",
           "description": "Custom API base URL (proxy or self-hosted gateway).",
           "isRequired": false,

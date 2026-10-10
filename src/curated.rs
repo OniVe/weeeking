@@ -1,3 +1,4 @@
+use crate::i18n::{t, tf};
 use crate::server::WeeekingServer;
 use crate::util::*;
 use rmcp::model::{CallToolResult, Tool, ToolAnnotations};
@@ -43,8 +44,16 @@ fn tool(
     .with_annotations(annotations)
 }
 
-const TASK_ID: &str = "ID задачи (целое число)";
-const MEMBER_ID: &str = "UUID участника воркспейса (weeek_context → members[].id)";
+fn task_id_desc() -> &'static str {
+    t!("ID задачи (целое число)", "Task ID (integer)")
+}
+
+fn member_id_desc() -> &'static str {
+    t!(
+        "UUID участника воркспейса (weeek_context → members[].id)",
+        "Workspace member UUID (weeek_context → members[].id)"
+    )
+}
 
 /// Фильтры поиска задач; пагинацией управляют perPage/offset (их добавляет `filtered_query`).
 const TASK_FILTER_KEYS: &[&str] = &[
@@ -97,38 +106,50 @@ pub fn tools(read_only: bool) -> Vec<Tool> {
     let mut out = vec![
         tool(
             "weeek_context",
-            "Weeek: контекст",
-            "Кто вы, воркспейс, участники, теги и проекты одним вызовом. Отсюда берутся все ID для остальных \
-             инструментов. projectId добавляет доски проекта, boardId — колонки доски. Кэш 5 минут (refresh=true — \
-             сбросить). compact=true — убрать null и пустые поля.",
+            t!("Weeek: контекст", "Weeek: context"),
+            t!(
+                "Кто вы, воркспейс, участники, теги и проекты одним вызовом. Отсюда берутся все ID для остальных \
+                 инструментов. projectId добавляет доски проекта, boardId — колонки доски. Кэш 5 минут (refresh=true — \
+                 сбросить). compact=true — убрать null и пустые поля.",
+                "Who you are, the workspace, members, tags, and projects in one call. All IDs for the other tools come \
+                 from here. projectId adds the project's boards, boardId — the board's columns. Cached for 5 minutes \
+                 (refresh=true drops the cache). compact=true removes null and empty fields."
+            ),
             json!({
-                "projectId": { "type": "integer", "description": "Добавить доски этого проекта" },
-                "boardId": { "type": "integer", "description": "Добавить колонки этой доски" },
-                "refresh": { "type": "boolean", "description": "Принудительно обновить кэш" },
-                "compact": { "type": "boolean", "description": "Убрать null и пустые поля из ответа" }
+                "projectId": { "type": "integer", "description": t!("Добавить доски этого проекта", "Add the boards of this project") },
+                "boardId": { "type": "integer", "description": t!("Добавить колонки этой доски", "Add the columns of this board") },
+                "refresh": { "type": "boolean", "description": t!("Принудительно обновить кэш", "Force-refresh the cache") },
+                "compact": { "type": "boolean", "description": t!("Убрать null и пустые поля из ответа", "Remove null and empty fields from the response") }
             }),
             &[],
             ann(true, false, true),
         ),
         tool(
             "weeek_search_tasks",
-            "Weeek: поиск задач",
-            "Поиск задач с фильтрами (проект, доска, колонка, исполнитель, завершённость, приоритет, тип, теги, текст, даты). \
-             Пагинация perPage (1–100, по умолчанию 25) и offset. 'search' ищет по заголовку и описанию. \
-             fetchAll=true собирает все страницы подряд (страница по умолчанию 100, но не более 50 страниц; \
-             maxItems — потолок, по умолчанию 200, максимум 1000); compact=true убирает null и пустые значения \
-             (включая пустые элементы массивов).",
+            t!("Weeek: поиск задач", "Weeek: task search"),
+            t!(
+                "Поиск задач с фильтрами (проект, доска, колонка, исполнитель, завершённость, приоритет, тип, теги, текст, даты). \
+                 Пагинация perPage (1–100, по умолчанию 25) и offset. 'search' ищет по заголовку и описанию. \
+                 fetchAll=true собирает все страницы подряд (страница по умолчанию 100, но не более 50 страниц; \
+                 maxItems — потолок, по умолчанию 200, максимум 1000); compact=true убирает null и пустые значения \
+                 (включая пустые элементы массивов).",
+                "Search tasks with filters (project, board, column, assignee, completion, priority, type, tags, text, dates). \
+                 Pagination via perPage (1–100, default 25) and offset. 'search' matches the title and description. \
+                 fetchAll=true collects all pages in sequence (page size defaults to 100, at most 50 pages; \
+                 maxItems — the cap, default 200, maximum 1000); compact=true removes null and empty values \
+                 (including empty array items)."
+            ),
             json!({
                 "projectId": { "type": "integer" },
                 "boardId": { "type": "integer" },
                 "boardColumnId": { "type": "integer" },
-                "userId": { "type": "string", "description": "Фильтр по исполнителю (UUID)" },
-                "completed": { "type": "boolean", "description": "true — только завершённые, false — только открытые" },
-                "all": { "type": "boolean", "description": "Вернуть и удалённые/завершённые (перекрывает completed)" },
+                "userId": { "type": "string", "description": t!("Фильтр по исполнителю (UUID)", "Filter by assignee (UUID)") },
+                "completed": { "type": "boolean", "description": t!("true — только завершённые, false — только открытые", "true — completed only, false — open only") },
+                "all": { "type": "boolean", "description": t!("Вернуть и удалённые/завершённые (перекрывает completed)", "Include deleted/completed as well (overrides completed)") },
                 "priority": { "type": "integer", "minimum": 0, "maximum": 3 },
                 "type": { "type": "string", "enum": ["action", "meet", "call"] },
-                "tags": { "type": "array", "items": { "type": "integer" }, "description": "ID тегов (weeek_context → tags[].id)" },
-                "search": { "type": "string", "description": "Текст по заголовку и описанию" },
+                "tags": { "type": "array", "items": { "type": "integer" }, "description": t!("ID тегов (weeek_context → tags[].id)", "Tag IDs (weeek_context → tags[].id)") },
+                "search": { "type": "string", "description": t!("Текст по заголовку и описанию", "Text to match in the title and description") },
                 "day": { "type": "string" },
                 "startDate": { "type": "string", "description": "YYYY-MM-DD" },
                 "endDate": { "type": "string", "description": "YYYY-MM-DD" },
@@ -137,51 +158,63 @@ pub fn tools(read_only: bool) -> Vec<Tool> {
                 "perPage": { "type": "integer", "minimum": 1, "maximum": 100 },
                 "offset": { "type": "integer", "minimum": 0 },
                 "sortBy": { "type": "string", "enum": ["name", "type", "priority", "duration", "overdue", "created", "date", "start"] },
-                "desc": { "type": "boolean", "description": "Сортировать по убыванию" },
-                "fetchAll": { "type": "boolean", "description": "Собрать все страницы до конца или до maxItems" },
-                "maxItems": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Потолок для fetchAll (по умолчанию 200)" },
-                "compact": { "type": "boolean", "description": "Убрать null и пустые поля из ответа" }
+                "desc": { "type": "boolean", "description": t!("Сортировать по убыванию", "Sort descending") },
+                "fetchAll": { "type": "boolean", "description": t!("Собрать все страницы до конца или до maxItems", "Collect all pages to the end or up to maxItems") },
+                "maxItems": { "type": "integer", "minimum": 1, "maximum": 1000, "description": t!("Потолок для fetchAll (по умолчанию 200)", "Cap for fetchAll (default 200)") },
+                "compact": { "type": "boolean", "description": t!("Убрать null и пустые поля из ответа", "Remove null and empty fields from the response") }
             }),
             &[],
             ann(true, false, true),
         ),
         tool(
             "weeek_get_task",
-            "Weeek: задача",
-            "Задача целиком: карточка плюс (по умолчанию) ветка комментариев — свежие первыми. \
-             compact=true — убрать null и пустые поля.",
+            t!("Weeek: задача", "Weeek: task"),
+            t!(
+                "Задача целиком: карточка плюс (по умолчанию) ветка комментариев — свежие первыми. \
+                 compact=true — убрать null и пустые поля.",
+                "The full task: the card plus (by default) the comment thread — newest first. \
+                 compact=true removes null and empty fields."
+            ),
             json!({
-                "taskId": { "type": "integer", "description": TASK_ID },
-                "includeComments": { "type": "boolean", "description": "Загрузить комментарии (по умолчанию true)" },
-                "commentsLimit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Сколько комментариев вернуть (по умолчанию 20)" },
-                "compact": { "type": "boolean", "description": "Убрать null и пустые поля из ответа" }
+                "taskId": { "type": "integer", "description": task_id_desc() },
+                "includeComments": { "type": "boolean", "description": t!("Загрузить комментарии (по умолчанию true)", "Load comments (default true)") },
+                "commentsLimit": { "type": "integer", "minimum": 1, "maximum": 100, "description": t!("Сколько комментариев вернуть (по умолчанию 20)", "How many comments to return (default 20)") },
+                "compact": { "type": "boolean", "description": t!("Убрать null и пустые поля из ответа", "Remove null and empty fields from the response") }
             }),
             &["taskId"],
             ann(true, false, true),
         ),
         tool(
             "weeek_list_comments",
-            "Weeek: комментарии задачи",
-            "Ветка комментариев задачи отдельно от карточки. Свежие первыми; offset листает в прошлое. \
-             fetchAll=true собирает все страницы (страница по умолчанию 100, но не более 50 страниц; maxItems — \
-             потолок, по умолчанию 200); compact=true — убрать null и пустые значения (включая пустые элементы массивов).",
+            t!("Weeek: комментарии задачи", "Weeek: task comments"),
+            t!(
+                "Ветка комментариев задачи отдельно от карточки. Свежие первыми; offset листает в прошлое. \
+                 fetchAll=true собирает все страницы (страница по умолчанию 100, но не более 50 страниц; maxItems — \
+                 потолок, по умолчанию 200); compact=true — убрать null и пустые значения (включая пустые элементы массивов).",
+                "The task's comment thread on its own. Newest first; offset pages into the past. \
+                 fetchAll=true collects all pages (page size defaults to 100, at most 50 pages; maxItems — \
+                 the cap, default 200); compact=true removes null and empty values (including empty array items)."
+            ),
             json!({
-                "taskId": { "type": "integer", "description": TASK_ID },
-                "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": "1–100, по умолчанию 50" },
-                "offset": { "type": "integer", "minimum": 0, "description": "Сколько пропустить, по умолчанию 0" },
-                "fetchAll": { "type": "boolean", "description": "Собрать все страницы до конца или до maxItems" },
-                "maxItems": { "type": "integer", "minimum": 1, "maximum": 1000, "description": "Потолок для fetchAll (по умолчанию 200)" },
-                "compact": { "type": "boolean", "description": "Убрать null и пустые поля из ответа" }
+                "taskId": { "type": "integer", "description": task_id_desc() },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 100, "description": t!("1–100, по умолчанию 50", "1–100, default 50") },
+                "offset": { "type": "integer", "minimum": 0, "description": t!("Сколько пропустить, по умолчанию 0", "How many to skip, default 0") },
+                "fetchAll": { "type": "boolean", "description": t!("Собрать все страницы до конца или до maxItems", "Collect all pages to the end or up to maxItems") },
+                "maxItems": { "type": "integer", "minimum": 1, "maximum": 1000, "description": t!("Потолок для fetchAll (по умолчанию 200)", "Cap for fetchAll (default 200)") },
+                "compact": { "type": "boolean", "description": t!("Убрать null и пустые поля из ответа", "Remove null and empty fields from the response") }
             }),
             &["taskId"],
             ann(true, false, true),
         ),
         tool(
             "weeek_download_attachment",
-            "Weeek: скачать вложение",
-            "Скачивает вложение задачи во временный каталог (%TEMP%\\weeeking) и возвращает путь к файлу.",
+            t!("Weeek: скачать вложение", "Weeek: download attachment"),
+            t!(
+                "Скачивает вложение задачи во временный каталог (%TEMP%\\weeeking) и возвращает путь к файлу.",
+                "Downloads a task attachment into a temporary directory (%TEMP%\\weeeking) and returns the file path."
+            ),
             json!({
-                "fileId": { "type": "string", "description": "ID вложения из задачи (поле attachments)" }
+                "fileId": { "type": "string", "description": t!("ID вложения из задачи (поле attachments)", "Attachment ID from the task (the attachments field)") }
             }),
             &["fileId"],
             ann(true, false, true),
@@ -195,39 +228,47 @@ pub fn tools(read_only: bool) -> Vec<Tool> {
     out.extend([
         tool(
             "weeek_create_task",
-            "Weeek: создать задачу",
-            "Создаёт задачу. Описание задаётся только при создании — потом его изменить нельзя (ограничение API). \
-             boardColumnId кладёт задачу в колонку доски. userId назначает исполнителя.",
+            t!("Weeek: создать задачу", "Weeek: create task"),
+            t!(
+                "Создаёт задачу. Описание задаётся только при создании — потом его изменить нельзя (ограничение API). \
+                 boardColumnId кладёт задачу в колонку доски. userId назначает исполнителя.",
+                "Creates a task. The description can only be set on creation — it cannot be changed later (API \
+                 limitation). boardColumnId puts the task into a board column. userId assigns the assignee."
+            ),
             json!({
-                "title": { "type": "string", "description": "Заголовок" },
-                "projectId": { "type": "integer", "description": "ID проекта (weeek_context → projects[].id)" },
-                "boardColumnId": { "type": ["integer", "null"], "description": "ID колонки доски" },
-                "description": { "type": "string", "description": "Описание (markdown)" },
-                "parentId": { "type": "integer", "description": "Родительская задача (подзадача)" },
-                "userId": { "type": "string", "description": MEMBER_ID },
+                "title": { "type": "string", "description": t!("Заголовок", "Title") },
+                "projectId": { "type": "integer", "description": t!("ID проекта (weeek_context → projects[].id)", "Project ID (weeek_context → projects[].id)") },
+                "boardColumnId": { "type": ["integer", "null"], "description": t!("ID колонки доски", "Board column ID") },
+                "description": { "type": "string", "description": t!("Описание (markdown)", "Description (markdown)") },
+                "parentId": { "type": "integer", "description": t!("Родительская задача (подзадача)", "Parent task (subtask)") },
+                "userId": { "type": "string", "description": member_id_desc() },
                 "type": { "type": "string", "enum": ["action", "meet", "call"] },
-                "priority": { "type": "integer", "minimum": 0, "maximum": 3, "description": "0 низкий, 1 средний, 2 высокий, 3 отложено" },
-                "customFields": { "type": "object", "description": "Кастомные поля: {fieldId: value}" }
+                "priority": { "type": "integer", "minimum": 0, "maximum": 3, "description": t!("0 низкий, 1 средний, 2 высокий, 3 отложено", "0 low, 1 medium, 2 high, 3 postponed") },
+                "customFields": { "type": "object", "description": t!("Кастомные поля: {fieldId: value}", "Custom fields: {fieldId: value}") }
             }),
             &["title", "projectId"],
             ann(false, false, false),
         ),
         tool(
             "weeek_update_task",
-            "Weeek: изменить задачу",
-            "Меняет поля задачи: title, priority, type, даты (start/due, date и dateTime), duration (минуты), tags, customFields. \
-             null очищает поле. tags заменяет ВЕСЬ список тегов — сначала прочитайте задачу, чтобы не потерять теги.",
+            t!("Weeek: изменить задачу", "Weeek: update task"),
+            t!(
+                "Меняет поля задачи: title, priority, type, даты (start/due, date и dateTime), duration (минуты), tags, customFields. \
+                 null очищает поле. tags заменяет ВЕСЬ список тегов — сначала прочитайте задачу, чтобы не потерять теги.",
+                "Changes task fields: title, priority, type, dates (start/due, date and dateTime), duration (minutes), \
+                 tags, customFields. null clears a field. tags replaces the WHOLE tag list — read the task first so you do not lose tags."
+            ),
             json!({
-                "taskId": { "type": "integer", "description": TASK_ID },
+                "taskId": { "type": "integer", "description": task_id_desc() },
                 "title": { "type": "string" },
                 "priority": { "type": ["integer", "null"], "minimum": 0, "maximum": 3 },
                 "type": { "type": ["string", "null"], "enum": ["action", "meet", "call", null] },
-                "startDate": { "type": ["string", "null"], "description": "YYYY-MM-DD, null — очистить" },
-                "dueDate": { "type": ["string", "null"], "description": "YYYY-MM-DD, null — очистить" },
-                "startDateTime": { "type": ["string", "null"], "description": "ISO 8601, null — очистить" },
-                "dueDateTime": { "type": ["string", "null"], "description": "ISO 8601, null — очистить" },
-                "duration": { "type": ["integer", "null"], "description": "Оценка, минуты; null — очистить" },
-                "tags": { "type": "array", "items": { "type": "integer" }, "description": "Полный список тегов (заменяет текущий)" },
+                "startDate": { "type": ["string", "null"], "description": t!("YYYY-MM-DD, null — очистить", "YYYY-MM-DD, null clears") },
+                "dueDate": { "type": ["string", "null"], "description": t!("YYYY-MM-DD, null — очистить", "YYYY-MM-DD, null clears") },
+                "startDateTime": { "type": ["string", "null"], "description": t!("ISO 8601, null — очистить", "ISO 8601, null clears") },
+                "dueDateTime": { "type": ["string", "null"], "description": t!("ISO 8601, null — очистить", "ISO 8601, null clears") },
+                "duration": { "type": ["integer", "null"], "description": t!("Оценка, минуты; null — очистить", "Estimate, minutes; null clears") },
+                "tags": { "type": "array", "items": { "type": "integer" }, "description": t!("Полный список тегов (заменяет текущий)", "The full tag list (replaces the current one)") },
                 "customFields": { "type": "object" }
             }),
             &["taskId"],
@@ -235,22 +276,28 @@ pub fn tools(read_only: bool) -> Vec<Tool> {
         ),
         tool(
             "weeek_move_task",
-            "Weeek: перенести задачу",
-            "Переносит задачу в другую доску и/или колонку (колонка и есть статус). Нужно хотя бы одно из полей.",
+            t!("Weeek: перенести задачу", "Weeek: move task"),
+            t!(
+                "Переносит задачу в другую доску и/или колонку (колонка и есть статус). Нужно хотя бы одно из полей.",
+                "Moves the task to another board and/or column (the column is the status). At least one of the fields is required."
+            ),
             json!({
-                "taskId": { "type": "integer", "description": TASK_ID },
-                "boardId": { "type": "integer", "description": "Доска (weeek_context → boards[].id)" },
-                "boardColumnId": { "type": "integer", "description": "Колонка (weeek_context → boardColumns[].id)" }
+                "taskId": { "type": "integer", "description": task_id_desc() },
+                "boardId": { "type": "integer", "description": t!("Доска (weeek_context → boards[].id)", "Board (weeek_context → boards[].id)") },
+                "boardColumnId": { "type": "integer", "description": t!("Колонка (weeek_context → boardColumns[].id)", "Column (weeek_context → boardColumns[].id)") }
             }),
             &["taskId"],
             ann(false, false, true),
         ),
         tool(
             "weeek_complete_task",
-            "Weeek: завершить/открыть задачу",
-            "completed=true завершает задачу, false — открывает заново (un-complete).",
+            t!("Weeek: завершить/открыть задачу", "Weeek: complete/reopen task"),
+            t!(
+                "completed=true завершает задачу, false — открывает заново (un-complete).",
+                "completed=true completes the task, false reopens it (un-complete)."
+            ),
             json!({
-                "taskId": { "type": "integer", "description": TASK_ID },
+                "taskId": { "type": "integer", "description": task_id_desc() },
                 "completed": { "type": "boolean" }
             }),
             &["taskId", "completed"],
@@ -258,37 +305,46 @@ pub fn tools(read_only: bool) -> Vec<Tool> {
         ),
         tool(
             "weeek_set_task_people",
-            "Weeek: исполнители и наблюдатели",
-            "Добавляет/убирает исполнителей и наблюдателей задачи. Нужен хотя бы один непустой список.",
+            t!("Weeek: исполнители и наблюдатели", "Weeek: assignees and watchers"),
+            t!(
+                "Добавляет/убирает исполнителей и наблюдателей задачи. Нужен хотя бы один непустой список.",
+                "Adds/removes task assignees and watchers. At least one non-empty list is required."
+            ),
             json!({
-                "taskId": { "type": "integer", "description": TASK_ID },
-                "addAssignees": { "type": "array", "items": { "type": "string" }, "description": MEMBER_ID },
-                "removeAssignees": { "type": "array", "items": { "type": "string" }, "description": MEMBER_ID },
-                "addWatchers": { "type": "array", "items": { "type": "string" }, "description": MEMBER_ID },
-                "removeWatchers": { "type": "array", "items": { "type": "string" }, "description": MEMBER_ID }
+                "taskId": { "type": "integer", "description": task_id_desc() },
+                "addAssignees": { "type": "array", "items": { "type": "string" }, "description": member_id_desc() },
+                "removeAssignees": { "type": "array", "items": { "type": "string" }, "description": member_id_desc() },
+                "addWatchers": { "type": "array", "items": { "type": "string" }, "description": member_id_desc() },
+                "removeWatchers": { "type": "array", "items": { "type": "string" }, "description": member_id_desc() }
             }),
             &["taskId"],
             ann(false, false, true),
         ),
         tool(
             "weeek_add_comment",
-            "Weeek: комментарий",
-            "Добавляет комментарий к задаче (markdown сохраняется как есть). parentId отвечает в ветку.",
+            t!("Weeek: комментарий", "Weeek: comment"),
+            t!(
+                "Добавляет комментарий к задаче (markdown сохраняется как есть). parentId отвечает в ветку.",
+                "Adds a comment to the task (markdown is kept as is). parentId replies into a thread."
+            ),
             json!({
-                "taskId": { "type": "integer", "description": TASK_ID },
-                "markdown": { "type": "string", "description": "Текст комментария (markdown)" },
-                "parentId": { "type": "integer", "description": "ID комментария, на который отвечаем" }
+                "taskId": { "type": "integer", "description": task_id_desc() },
+                "markdown": { "type": "string", "description": t!("Текст комментария (markdown)", "Comment text (markdown)") },
+                "parentId": { "type": "integer", "description": t!("ID комментария, на который отвечаем", "ID of the comment being replied to") }
             }),
             &["taskId", "markdown"],
             ann(false, false, false),
         ),
         tool(
             "weeek_delete_comment",
-            "Weeek: удалить комментарий",
-            "Удаляет комментарий безвозвратно (редактировать комментарии API не умеет). Ответы на него остаются.",
+            t!("Weeek: удалить комментарий", "Weeek: delete comment"),
+            t!(
+                "Удаляет комментарий безвозвратно (редактировать комментарии API не умеет). Ответы на него остаются.",
+                "Deletes the comment permanently (the API cannot edit comments). Replies to it remain."
+            ),
             json!({
-                "taskId": { "type": "integer", "description": TASK_ID },
-                "commentId": { "type": "integer", "description": "ID комментария (из weeek_get_task)" }
+                "taskId": { "type": "integer", "description": task_id_desc() },
+                "commentId": { "type": "integer", "description": t!("ID комментария (из weeek_get_task)", "Comment ID (from weeek_get_task)") }
             }),
             &["taskId", "commentId"],
             ann(false, true, true),
@@ -313,7 +369,10 @@ impl WeeekingServer {
             "weeek_set_task_people" => self.tool_set_task_people(&args).await,
             "weeek_add_comment" => self.tool_add_comment(&args).await,
             "weeek_delete_comment" => self.tool_delete_comment(&args).await,
-            _ => Err(format!("Неизвестный инструмент: {name}")),
+            _ => Err(tf!(
+                "Неизвестный инструмент: {name}",
+                "Unknown tool: {name}"
+            )),
         };
         match result {
             Ok(value) => json_result(&value, self.max_chars),
@@ -366,7 +425,7 @@ impl WeeekingServer {
 
         let object = data
             .as_object_mut()
-            .ok_or_else(|| "контекст повреждён".to_string())?;
+            .ok_or_else(|| t!("контекст повреждён", "the context is corrupted").to_string())?;
         if let Some(project_id) = arg_i64(args, "projectId") {
             let query = vec![("projectId".to_string(), project_id.to_string())];
             let boards = self
@@ -585,8 +644,13 @@ impl WeeekingServer {
 
     async fn tool_download_attachment(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let file_id = req_str(args, "fileId")?;
-        let op = crate::spec::find_operation("get-attachment")
-            .ok_or_else(|| "в спецификации нет get-attachment".to_string())?;
+        let op = crate::spec::find_operation("get-attachment").ok_or_else(|| {
+            t!(
+                "в спецификации нет get-attachment",
+                "get-attachment is missing from the spec"
+            )
+            .to_string()
+        })?;
         let param_name = op.path_params.first().map(|p| p.name).unwrap_or("file_id");
         let encoded = encode_path_segment(&file_id)?;
         let path = op.path.replace(&format!("{{{param_name}}}"), &encoded);
@@ -645,7 +709,11 @@ impl WeeekingServer {
             }
         }
         if body.is_empty() {
-            return Err("Не указано ни одно поле для изменения.".into());
+            return Err(t!(
+                "Не указано ни одно поле для изменения.",
+                "No fields to change were provided."
+            )
+            .into());
         }
         self.client
             .call(
@@ -663,7 +731,11 @@ impl WeeekingServer {
         let board_id = arg_i64(args, "boardId");
         let column_id = arg_i64(args, "boardColumnId");
         if board_id.is_none() && column_id.is_none() {
-            return Err("Укажите boardId и/или boardColumnId.".into());
+            return Err(t!(
+                "Укажите boardId и/или boardColumnId.",
+                "Provide boardId and/or boardColumnId."
+            )
+            .into());
         }
         let mut out = Map::new();
         if let Some(board) = board_id {
@@ -698,7 +770,11 @@ impl WeeekingServer {
     async fn tool_complete_task(&self, args: &Map<String, Value>) -> Result<Value, String> {
         let task_id = req_i64(args, "taskId")?;
         let completed = arg_bool(args, "completed").ok_or_else(|| {
-            "Не задан обязательный параметр «completed» (true/false).".to_string()
+            t!(
+                "Не задан обязательный параметр «completed» (true/false).",
+                "Missing required parameter `completed` (true/false)."
+            )
+            .to_string()
         })?;
         let suffix = if completed { "complete" } else { "un-complete" };
         self.client
@@ -764,7 +840,11 @@ impl WeeekingServer {
             );
         }
         if results.is_empty() {
-            return Err("Не указано ни одного списка участников.".into());
+            return Err(t!(
+                "Не указано ни одного списка участников.",
+                "No member lists were provided."
+            )
+            .into());
         }
         Ok(if results.len() == 1 {
             results.pop().unwrap_or(Value::Null)

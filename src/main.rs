@@ -2,6 +2,7 @@ mod config;
 mod curated;
 mod generated;
 mod http;
+mod i18n;
 mod server;
 mod spec;
 mod spec_generated;
@@ -10,22 +11,36 @@ mod util;
 
 use rmcp::ServiceExt;
 
+const HELP_RU: &str = "🛡️  Weeeking — MCP-сервер для Weeek (полный API, Weeek and conquer).\n\
+     \n\
+     Использование:\n\
+     \x20 weeeking                                запустить MCP-сервер (stdio)\n\
+     \x20 weeeking store-token [--account <имя>]  сохранить токен в системное хранилище\n\
+     \x20 weeeking --help                         эта справка\n\
+     \n\
+     Токен ищется в порядке: WEEEK_API_TOKEN / WEEEK_TOKEN → системное хранилище\n\
+     (запись `weeek-mcp`, имя аккаунта из WEEEK_KEYCHAIN_ACCOUNT, по умолчанию `api-token`;\n\
+     Windows Credential Manager / macOS Keychain / Linux Secret Service).\n\
+     \n\
+     Основные переменные: READ_ONLY=true|false, WEEEK_LANG=ru|en, WEEEK_BASE_URL,\n\
+     WEEEK_TIMEOUT_MS, WEEEK_MAX_RESPONSE_CHARS, WEEEK_DISABLE_KEYCHAIN=1, WEEEK_KEYCHAIN_ACCOUNT.";
+
+const HELP_EN: &str = "🛡️  Weeeking — an MCP server for Weeek (full API, Weeek and conquer).\n\
+     \n\
+     Usage:\n\
+     \x20 weeeking                                run the MCP server (stdio)\n\
+     \x20 weeeking store-token [--account <name>] save the token to the system keychain\n\
+     \x20 weeeking --help                         show this help\n\
+     \n\
+     The token is resolved in this order: WEEEK_API_TOKEN / WEEEK_TOKEN → system keychain\n\
+     (service `weeek-mcp`, entry name from WEEEK_KEYCHAIN_ACCOUNT, default `api-token`;\n\
+     Windows Credential Manager / macOS Keychain / Linux Secret Service).\n\
+     \n\
+     Main variables: READ_ONLY=true|false, WEEEK_LANG=ru|en, WEEEK_BASE_URL,\n\
+     WEEEK_TIMEOUT_MS, WEEEK_MAX_RESPONSE_CHARS, WEEEK_DISABLE_KEYCHAIN=1, WEEEK_KEYCHAIN_ACCOUNT.";
+
 fn print_usage() {
-    println!(
-        "🛡️  Weeeking — MCP-сервер для Weeek (полный API, Weeek and conquer).\n\
-         \n\
-         Использование:\n\
-         \x20 weeeking                                запустить MCP-сервер (stdio)\n\
-         \x20 weeeking store-token [--account <имя>]  сохранить токен в системное хранилище\n\
-         \x20 weeeking --help                         эта справка\n\
-         \n\
-         Токен ищется в порядке: WEEEK_API_TOKEN / WEEEK_TOKEN → системное хранилище\n\
-         (запись `weeek-mcp`, имя аккаунта из WEEEK_KEYCHAIN_ACCOUNT, по умолчанию `api-token`;\n\
-         Windows Credential Manager / macOS Keychain / Linux Secret Service).\n\
-         \n\
-         Основные переменные: READ_ONLY=true|false, WEEEK_BASE_URL, WEEEK_TIMEOUT_MS,\n\
-         WEEEK_MAX_RESPONSE_CHARS, WEEEK_DISABLE_KEYCHAIN=1, WEEEK_KEYCHAIN_ACCOUNT."
-    );
+    println!("{}", i18n::t!(HELP_RU, HELP_EN));
 }
 
 /// Разбирает имя аккаунта: `--account <имя>` или первый позиционный аргумент.
@@ -57,7 +72,13 @@ async fn main() -> anyhow::Result<()> {
             return Ok(());
         }
         Some(other) => {
-            eprintln!("Неизвестная команда: {other}\n");
+            eprintln!(
+                "{}",
+                i18n::tf!(
+                    "Неизвестная команда: {other}\n",
+                    "Unknown command: {other}\n"
+                )
+            );
             print_usage();
             std::process::exit(2);
         }
@@ -70,14 +91,18 @@ async fn main() -> anyhow::Result<()> {
     let server = server::WeeekingServer::new(client, cfg.read_only, cfg.max_chars);
 
     eprintln!(
-        "[weeeking] готов. Спека: {} (chunk {}), {} операций — {}. READ_ONLY={}, токен: {}, API {}",
-        spec::SPEC_TITLE,
-        spec::SPEC_VERSION,
-        spec::OPERATIONS.len(),
-        spec::SPEC_URL,
-        cfg.read_only,
-        source.describe(),
-        cfg.base_url
+        "{}",
+        i18n::tf!(
+            "[weeeking] готов. Спека: {} (chunk {}), {} операций — {}. READ_ONLY={}, токен: {}, API {}",
+            "[weeeking] ready. Spec: {} (chunk {}), {} operations — {}. READ_ONLY={}, token: {}, API {}",
+            spec::SPEC_TITLE,
+            spec::SPEC_VERSION,
+            spec::OPERATIONS.len(),
+            spec::SPEC_URL,
+            cfg.read_only,
+            source.describe(),
+            cfg.base_url
+        )
     );
 
     let running = server.serve(rmcp::transport::io::stdio()).await?;

@@ -127,6 +127,87 @@ fn cli_unknown_command_exits_2() {
 }
 
 #[test]
+fn cli_help_and_errors_follow_weeek_lang() {
+    let en = Command::new(env!("CARGO_BIN_EXE_weeeking"))
+        .arg("--help")
+        .env("WEEEK_LANG", "en")
+        .output()
+        .expect("run --help (en)");
+    let text = String::from_utf8_lossy(&en.stdout);
+    assert!(text.contains("Usage:"), "en help must be English: {text}");
+    assert!(
+        text.contains("WEEEK_LANG=ru|en"),
+        "en help must document WEEEK_LANG: {text}"
+    );
+
+    let ru = Command::new(env!("CARGO_BIN_EXE_weeeking"))
+        .arg("--help")
+        .env("WEEEK_LANG", "ru")
+        .output()
+        .expect("run --help (ru)");
+    let text = String::from_utf8_lossy(&ru.stdout);
+    assert!(
+        text.contains("Использование:"),
+        "ru help must be Russian: {text}"
+    );
+
+    let unknown = Command::new(env!("CARGO_BIN_EXE_weeeking"))
+        .arg("definitely-not-a-command")
+        .env("WEEEK_LANG", "en")
+        .output()
+        .expect("run unknown command (en)");
+    let stderr = String::from_utf8_lossy(&unknown.stderr);
+    assert!(
+        stderr.contains("Unknown command"),
+        "en CLI error must be English: {stderr}"
+    );
+}
+
+#[test]
+fn mcp_surface_follows_weeek_lang() {
+    let mut client = McpClient::start(&[("WEEEK_LANG", "en")]);
+    let tools = client.list_tools();
+    let search = tools
+        .iter()
+        .find(|tool| tool["name"] == "weeek_search_tasks")
+        .expect("weeek_search_tasks tool must exist");
+    let description = search["description"].as_str().unwrap_or_default();
+    assert!(
+        description.contains("Search tasks"),
+        "en tool description: {description}"
+    );
+
+    let prompt = client.get_prompt("my-tasks-today");
+    let text = prompt["messages"][0]["content"]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(text.contains("Collect my tasks"), "en prompt text: {text}");
+
+    let resources = client.list_resources();
+    let me = resources
+        .iter()
+        .find(|resource| resource["uri"] == "weeek://me")
+        .expect("weeek://me resource must exist");
+    assert_eq!(
+        me["title"].as_str().unwrap_or_default(),
+        "User",
+        "en resource title: {me}"
+    );
+
+    let mut ru = McpClient::start(&[]);
+    let tools = ru.list_tools();
+    let search = tools
+        .iter()
+        .find(|tool| tool["name"] == "weeek_search_tasks")
+        .expect("weeek_search_tasks tool must exist");
+    let description = search["description"].as_str().unwrap_or_default();
+    assert!(
+        description.contains("Поиск задач"),
+        "ru tool description (default): {description}"
+    );
+}
+
+#[test]
 fn required_params_are_validated_client_side() {
     let mut client = McpClient::start(&[("READ_ONLY", "false")]);
 

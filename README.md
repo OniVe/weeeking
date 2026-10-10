@@ -90,6 +90,7 @@ Linux x64 gnu/musl, Linux arm64, macOS arm64/x64) из GitHub Releases этой 
 | --- | --- | --- |
 | `WEEEK_API_TOKEN` | — | Токен из Weeek (Настройки workspace → API). Без него чтения невозможны. |
 | `READ_ONLY` | `true` | `false`/`0` — открыть изменяющие операции (создание, правка, удаление, CRM). |
+| `WEEEK_LANG` | `ru` | Язык пользовательских текстов (`ru`/`en`): справка, описания инструментов, промпты, ошибки. |
 | `WEEEK_BASE_URL` | `https://api.weeek.net/public/v1` | Свой прокси/хост при необходимости. |
 | `WEEEK_TIMEOUT_MS` | `30000` | Таймаут запроса. |
 | `WEEEK_MAX_RESPONSE_CHARS` | `60000` | Обрезка больших ответов. |
