@@ -17,11 +17,21 @@ impl TokenSource {
     }
 }
 
+/// Название системного хранилища текущей платформы (для сообщений).
+const KEYCHAIN_LABEL: &str = if cfg!(windows) {
+    "Windows Credential Manager"
+} else if cfg!(target_os = "macos") {
+    "macOS Keychain"
+} else {
+    "Linux Secret Service"
+};
+
 /// Token resolution order:
 /// 1. WEEEK_API_TOKEN / WEEEK_TOKEN from the environment.
 /// 2. The OS keychain entry `weeek-mcp` / `WEEEK_KEYCHAIN_ACCOUNT` (default
 ///    `api-token`), filled in by `weeeking store-token`; other accounts live
-///    in sibling entries (мультиаккаунт).
+///    in sibling entries (мультиаккаунт). Хранилища: Windows Credential
+///    Manager, macOS Keychain, Linux Secret Service (D-Bus).
 pub fn resolve(cfg: &Config) -> (Option<String>, TokenSource) {
     for key in ["WEEEK_API_TOKEN", "WEEEK_TOKEN"] {
         if let Ok(value) = std::env::var(key) {
@@ -42,7 +52,10 @@ pub fn resolve(cfg: &Config) -> (Option<String>, TokenSource) {
     (None, TokenSource::None)
 }
 
-#[cfg(windows)]
+/// Читает токен из системного хранилища платформы.
+///
+/// Ошибки (нет D-Bus/Secret Service, headless-сессия, отказ доступа) означают
+/// «в хранилище ничего нет» — токен тогда ищется в переменных окружения.
 fn read_keychain(account: &str) -> Option<String> {
     let entry = keyring::Entry::new("weeek-mcp", account).ok()?;
     let stored = entry.get_password().ok()?;
@@ -54,16 +67,7 @@ fn read_keychain(account: &str) -> Option<String> {
     }
 }
 
-#[cfg(not(windows))]
-fn read_keychain(_account: &str) -> Option<String> {
-    // On non-Windows platforms the token comes from WEEEK_API_TOKEN / WEEEK_TOKEN;
-    // Secret Service (Linux) and Keychain (macOS) integrations can be added later
-    // without touching the server core.
-    None
-}
-
 /// Сохраняет токен в системное хранилище под записью `account`.
-#[cfg(windows)]
 pub fn store_token(account: &str) -> anyhow::Result<()> {
     use anyhow::{Context, bail};
     use std::io::IsTerminal as _;
@@ -86,36 +90,29 @@ pub fn store_token(account: &str) -> anyhow::Result<()> {
     }
 
     let entry = keyring::Entry::new("weeek-mcp", account)
-        .context("нет доступа к системному хранилищу (Windows Credential Manager)")?;
+        .with_context(|| format!("нет доступа к системному хранилищу ({KEYCHAIN_LABEL})"))?;
     entry
         .set_password(token)
-        .context("не удалось сохранить токен в хранилище")?;
+        .with_context(|| format!("не удалось сохранить токен в хранилище ({KEYCHAIN_LABEL})"))?;
     let stored = entry
         .get_password()
-        .context("токен сохранён, но не читается обратно — проверьте хранилище")?;
-    if stored != token {
+        .with_context(|| format!("токен сохранён, но не читается обратно ({KEYCHAIN_LABEL})"))?;
+    if stored.trim() != token {
         bail!("проверка чтением не прошла — токен сохранён некорректно.");
     }
 
-    println!("✓ Токен сохранён: хранилище `weeek-mcp`, запись `{account}`");
+    println!("✓ Токен сохранён: хранилище `weeek-mcp`, запись `{account}` ({KEYCHAIN_LABEL})");
     println!("  Запуск сервера под этим аккаунтом: WEEEK_KEYCHAIN_ACCOUNT={account}");
     Ok(())
 }
 
-#[cfg(not(windows))]
-pub fn store_token(_account: &str) -> anyhow::Result<()> {
-    anyhow::bail!(
-        "store-token пока поддержан только на Windows (Credential Manager); \
-         на Linux и macOS задайте токен через WEEEK_API_TOKEN или WEEEK_TOKEN."
-    )
-}
-
-#[cfg(all(test, windows))]
+#[cfg(test)]
 mod tests {
-    /// Полный проход через настоящее хранилище: запись → чтение → удаление.
-    /// Запуск вручную: cargo test -- --ignored keychain_round_trip
+    /// Полный проход через настоящее хранилище платформы: запись → чтение → удаление.
+    /// Запуск вручную (нужно живое хранилище: Credential Manager / Keychain / Secret Service):
+    /// `cargo test -- --ignored keychain_round_trip`
     #[test]
-    #[ignore = "трогает настоящий Windows Credential Manager (создаёт и удаляет тестовую запись)"]
+    #[ignore = "трогает настоящее системное хранилище (создаёт и удаляет тестовую запись)"]
     fn keychain_round_trip() {
         let account = "api-token-selftest";
         let entry = keyring::Entry::new("weeek-mcp", account).expect("открыть запись");

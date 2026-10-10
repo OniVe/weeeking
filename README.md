@@ -98,12 +98,14 @@ Linux x64 gnu/musl, Linux arm64, macOS arm64/x64) из GitHub Releases этой 
 ### Откуда берётся токен
 
 1. `WEEEK_API_TOKEN` (или `WEEEK_TOKEN`) из окружения — приоритет всегда за ним.
-2. На Windows — запись сервиса `weeek-mcp` с именем **`WEEEK_KEYCHAIN_ACCOUNT`** (по умолчанию `api-token`;
-   в диспетчере учётных данных target — `api-token.weeek-mcp`) в Windows Credential
-   Manager (сохраняется командой `weeeking store-token`). Значение никогда не логируется.
+2. В системном хранилище — запись сервиса `weeek-mcp` с именем **`WEEEK_KEYCHAIN_ACCOUNT`**
+   (по умолчанию `api-token`): Windows Credential Manager (target `api-token.weeek-mcp`),
+   macOS Keychain, Linux Secret Service (GNOME Keyring/KWallet через D-Bus); сохраняется командой
+   `weeeking store-token`. Значение никогда не логируется.
 3. Если пусто — сервер поднимается, но вызовы возвращают `isError` с подсказкой.
 
-На **Linux и macOS** токен задаётся переменными окружения `WEEEK_API_TOKEN` или `WEEEK_TOKEN` — системное хранилище на этих платформах пока не поддерживается.
+Системное хранилище работает на всех платформах; на **headless-Linux без D-Bus** его нет — задайте
+токен переменными окружения `WEEEK_API_TOKEN` или `WEEEK_TOKEN`.
 
 ### Несколько аккаунтов Weeek
 
@@ -111,12 +113,13 @@ Linux x64 gnu/musl, Linux arm64, macOS arm64/x64) из GitHub Releases этой 
 Для второго пользователя нужен **его собственный токен** (создаётся в Настройках workspace → API; доступ к разделу
 есть у супер-админов и админов).
 
-```powershell
+```text
 # 1) Сохранить токен второго аккаунта (ввод скрыт, в argv токен не попадает)
 weeeking store-token --account api-token-anna
 
-# 2) Запуск сервера под этим аккаунтом в PowerShell
-$env:WEEEK_KEYCHAIN_ACCOUNT = "api-token-anna"; weeeking
+# 2) Запуск сервера под этим аккаунтом
+$env:WEEEK_KEYCHAIN_ACCOUNT = "api-token-anna"; weeeking   # PowerShell (Windows)
+WEEEK_KEYCHAIN_ACCOUNT=api-token-anna weeeking             # bash/zsh (macOS, Linux)
 ```
 
 Пример второго инстанса в конфиге OpenCode (нативная форма V2):
@@ -137,9 +140,12 @@ $env:WEEEK_KEYCHAIN_ACCOUNT = "api-token-anna"; weeeking
 ```
 
 Агент сможет выбирать, от кого действовать: тулы `weeek-anna_*` пишут от Анны, `weeek_*` — от основного аккаунта.
-Удалить запись из хранилища: `cmdkey /delete:api-token-anna.weeek-mcp`.
+Удалить запись из хранилища: Windows — `cmdkey /delete:api-token-anna.weeek-mcp`;
+macOS — `security delete-generic-password -s weeek-mcp -a api-token-anna`;
+Linux — средствами вашего хранилища (GNOME Keyring / KWallet).
 
-На Linux и macOS мультиаккаунт — отдельный инстанс сервера с собственным `WEEEK_API_TOKEN` в окружении.
+На headless-Linux без D-Bus системного хранилища нет: мультиаккаунт — отдельный инстанс сервера
+с собственным `WEEEK_API_TOKEN` в окружении.
 
 ### CLI
 

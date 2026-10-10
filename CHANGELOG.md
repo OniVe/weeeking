@@ -6,6 +6,9 @@
 
 ### Добавлено
 
+- Системное хранилище токена на всех платформах: **macOS Keychain** и **Linux Secret Service**
+  (GNOME Keyring/KWallet через D-Bus) в дополнение к Windows Credential Manager; `weeeking store-token`
+  работает на всех ОС.
 - Публикация в официальный MCP Registry (`registry.modelcontextprotocol.io`) из CI через GitHub OIDC:
   npm-пакет получил поле `mcpName`, в репозитории добавлен `server.json`; запись обновляется
   автоматически при выходе релиза и видна MCP-клиентам (VS Code, Copilot и др. — через каталог GitHub).
@@ -21,9 +24,9 @@
 
 ### Исправлено
 
-- README и справка CLI: убраны устаревшие формулировки («пилот»), платформы и токен на Linux/macOS
-  описаны актуально (только переменные окружения), примеры OpenCode переведены на нативную V2-форму
-  (`mcp.servers`), сообщение `store-token` на не-Windows уточнено (Linux и macOS).
+- README и справка CLI: убраны устаревшие формулировки («пилот»), платформы и работа с токеном описаны
+  актуально (системное хранилище на Windows/macOS/Linux), примеры OpenCode переведены на нативную
+  V2-форму (`mcp.servers`).
 
 ## [0.4.0] — 2026-10-09
 

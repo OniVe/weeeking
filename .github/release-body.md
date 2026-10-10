@@ -7,8 +7,11 @@
 
 - **Официальный MCP Registry**: запись `io.github.OniVe/weeeking` — обновляется автоматически на каждый
   релиз (npm-пакет с полем `mcpName` + `server.json`, публикация из CI через GitHub OIDC, без секретов)
-- README: убраны устаревшие формулировки, актуальные платформы (семь), токен на Linux/macOS
-  (только переменные окружения), нативная форма конфигурации OpenCode V2 (`mcp.servers`)
+- **Системное хранилище токена на всех платформах**: macOS Keychain и Linux Secret Service
+  (GNOME Keyring/KWallet) в дополнение к Windows Credential Manager — `weeeking store-token` больше
+  не Windows-only
+- README: убраны устаревшие формулировки, актуальные платформы (семь), нативная форма конфигурации
+  OpenCode V2 (`mcp.servers`)
 
 **Установка**
 

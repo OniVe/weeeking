@@ -19,7 +19,7 @@
       "environmentVariables": [
         {
           "name": "WEEEK_API_TOKEN",
-          "description": "Weeek API token (Weeek: Settings → API). Alternative: `weeeking store-token` on Windows.",
+          "description": "Weeek API token (Weeek: Settings → API). Alternative: store it with `weeeking store-token`.",
           "isRequired": false,
           "isSecret": true
         },
@@ -43,7 +43,7 @@
         },
         {
           "name": "WEEEK_DISABLE_KEYCHAIN",
-          "description": "1 — do not read the token from the OS keychain (Windows Credential Manager).",
+          "description": "1 — do not read the token from the system keychain (Credential Manager / Keychain / Secret Service).",
           "isRequired": false,
           "isSecret": false
         },
