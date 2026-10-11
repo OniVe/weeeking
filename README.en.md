@@ -219,6 +219,21 @@ python tools\rebuild.py
 - `tags` in `weeek_update_task` **replaces the whole list** — read the task first.
 - Comments can be created and deleted, but **not edited**.
 
+## Contributing
+
+The project welcomes contributions and questions: bug reports, ideas and questions go to
+[issues](https://github.com/OniVe/weeeking/issues/new/choose) (templates are provided for common cases).
+
+- How to build, which checks are required and what a PR needs — see [CONTRIBUTING.md](CONTRIBUTING.md).
+- By participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+Maintained by [@OniVe](https://github.com/OniVe).
+
+## Security
+
+Report vulnerabilities privately — see [SECURITY.md](SECURITY.md). Tokens never appear in logs;
+please do not attach them to issues or PRs.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

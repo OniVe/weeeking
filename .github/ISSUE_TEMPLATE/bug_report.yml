@@ -1,0 +1,81 @@
+name: Баг-репорт
+description: Сообщить об ошибке в Weeeking
+title: "[Баг]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за сообщение! Заполните форму — так ошибку будет проще воспроизвести и починить.
+        Не прикладывайте токены и приватные данные: их достаточно заменить на `***`.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: Что произошло
+      description: Кратко опишите проблему.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как воспроизвести
+      description: Шаги, вызов инструмента или MCP-запрос, входные данные.
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Ожидаемое поведение
+      description: Что вы ожидали увидеть вместо этого?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Версия weeeking
+      description: "Например, из справки `--help`, имени релизного файла или версии npm-пакета."
+      placeholder: 0.5.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Операционная система
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - другая
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Способ установки
+      options:
+        - npx / npm-обёртка
+        - готовый бинарник из релиза
+        - собран из исходников (cargo build)
+        - другой
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Логи и вывод
+      description: "stderr сервера и/или ответ инструмента. Уберите токены и приватные данные."
+      render: text
+    validations:
+      required: false
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Подтверждения
+      options:
+        - label: Я проверил(а), что похожего issue ещё нет.
+          required: true
+        - label: В тексте нет токенов и приватных данных.
+          required: true

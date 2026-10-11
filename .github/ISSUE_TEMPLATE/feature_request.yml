@@ -1,0 +1,38 @@
+name: Идея / фича
+description: Предложить улучшение Weeeking
+title: "[Идея]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо за идею! Проект — тонкая обёртка над публичным API Weeek: то, чего нет в API,
+        относится к Weeek, а не к weeeking. Обсуждение до написания кода экономит время всем.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Задача
+      description: Какую проблему хотите решить? Что не получается сейчас?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Предлагаемое решение
+      description: Как это могло бы выглядеть в weeeking.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Альтернативы
+      description: Что ещё рассматривали и почему не подошло.
+    validations:
+      required: false
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Подтверждения
+      options:
+        - label: Я проверил(а), что такой идеи ещё нет среди issues.
+          required: true
