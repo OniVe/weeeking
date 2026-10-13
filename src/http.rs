@@ -2,7 +2,9 @@ use crate::config::Config;
 use crate::i18n::{t, tf};
 use futures_util::StreamExt;
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+use tokio::sync::Mutex as AsyncMutex;
 
 /// Тело ошибки в сообщении ограничиваем, чтобы огромный ответ API не раздувал ответ тула.
 const ERROR_BODY_MAX_CHARS: usize = 2000;
@@ -96,6 +98,99 @@ pub struct WeeekClient {
     retry_max: u32,
     retry_base_ms: u64,
     log_debug: bool,
+    throttle: Option<RateLimiter>,
+}
+
+/// Клиентский throttle: token bucket на все HTTP-запросы инстанса, включая ретраи.
+///
+/// Лимит — средняя скорость `rps` запросов/с со всплеском до `capacity` токенов.
+/// Выключен по умолчанию (`WEEEK_RPS` не задан или ≤ 0) — baseline-поведение не меняется.
+struct RateLimiter {
+    rps: f64,
+    capacity: f64,
+    state: AsyncMutex<Bucket>,
+    total: AtomicU64,
+    delayed: AtomicU64,
+    log_debug: bool,
+}
+
+struct Bucket {
+    tokens: f64,
+    last: Instant,
+}
+
+/// Ёмкость ведра: явный `WEEEK_RPS_BURST` или «секунда запаса» (не меньше одного токена).
+fn bucket_capacity(rps: f64, burst: Option<u32>) -> f64 {
+    burst.map(f64::from).unwrap_or_else(|| rps.ceil().max(1.0))
+}
+
+/// Потолок одной «порции» сна: длинные ожидания дремлют порциями, чтобы конверсия
+/// в `Duration` не паниковала ни на каких принимаемых значениях.
+const MAX_THROTTLE_CHUNK: Duration = Duration::from_secs(30);
+
+/// Порция сна для недостающего времени: без паник (inf/NaN → потолок), ≤30 с и ≥1 мс.
+fn throttle_chunk(needed_secs: f64) -> Duration {
+    Duration::try_from_secs_f64(needed_secs)
+        .unwrap_or(MAX_THROTTLE_CHUNK)
+        .min(MAX_THROTTLE_CHUNK)
+        .max(Duration::from_millis(1))
+}
+
+impl RateLimiter {
+    fn new(rps: f64, burst: Option<u32>, log_debug: bool) -> Self {
+        let capacity = bucket_capacity(rps, burst);
+        Self {
+            rps,
+            capacity,
+            state: AsyncMutex::new(Bucket {
+                tokens: capacity,
+                last: Instant::now(),
+            }),
+            total: AtomicU64::new(0),
+            delayed: AtomicU64::new(0),
+            log_debug,
+        }
+    }
+
+    /// Ждёт разрешения по бюджету; вызывается перед каждой попыткой, включая ретраи.
+    ///
+    /// Лок удерживается во время ожидания: очередь честная (FIFO), а токены начисляются
+    /// за фактически прошедшее время. Ожидание режется на порции не длиннее
+    /// [`MAX_THROTTLE_CHUNK`], конверсия в `Duration` не паникует даже на inf/NaN.
+    async fn acquire(&self) {
+        let mut slept = Duration::ZERO;
+        {
+            let mut bucket = self.state.lock().await;
+            loop {
+                let now = Instant::now();
+                let elapsed = now.saturating_duration_since(bucket.last).as_secs_f64();
+                bucket.last = now;
+                bucket.tokens = (bucket.tokens + elapsed * self.rps).min(self.capacity);
+                if bucket.tokens >= 1.0 {
+                    bucket.tokens -= 1.0;
+                    break;
+                }
+                let needed = (1.0 - bucket.tokens) / self.rps;
+                let chunk = throttle_chunk(needed);
+                let started = Instant::now();
+                tokio::time::sleep(chunk).await;
+                slept += started.elapsed();
+            }
+        }
+        let total = self.total.fetch_add(1, Ordering::Relaxed) + 1;
+        if slept > Duration::ZERO {
+            let delayed = self.delayed.fetch_add(1, Ordering::Relaxed) + 1;
+            if self.log_debug {
+                eprintln!(
+                    "[weeeking] throttle: rps={}, waited {} ms (delayed {} of {} requests)",
+                    self.rps,
+                    slept.as_millis(),
+                    delayed,
+                    total
+                );
+            }
+        }
+    }
 }
 
 impl WeeekClient {
@@ -104,6 +199,9 @@ impl WeeekClient {
             .timeout(Duration::from_millis(cfg.timeout_ms))
             .build()
             .expect("failed to build the HTTP client");
+        let throttle = cfg
+            .rps
+            .map(|rps| RateLimiter::new(rps, cfg.rps_burst, cfg.log_debug));
         Self {
             http,
             base_url: cfg.base_url.clone(),
@@ -112,6 +210,7 @@ impl WeeekClient {
             retry_max: cfg.retry_max,
             retry_base_ms: cfg.retry_base_ms,
             log_debug: cfg.log_debug,
+            throttle,
         }
     }
 
@@ -181,6 +280,9 @@ impl WeeekClient {
     {
         let mut attempt: u32 = 0;
         loop {
+            if let Some(throttle) = &self.throttle {
+                throttle.acquire().await;
+            }
             let started = Instant::now();
             match build().send().await {
                 Ok(response) => {
@@ -469,6 +571,27 @@ fn sanitize_filename(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bucket_capacity_defaults_to_one_second_of_tokens() {
+        assert_eq!(bucket_capacity(1.0, None), 1.0);
+        assert_eq!(bucket_capacity(10.0, None), 10.0);
+        assert_eq!(bucket_capacity(0.5, None), 1.0);
+        assert_eq!(bucket_capacity(10.0, Some(3)), 3.0);
+        assert_eq!(bucket_capacity(0.5, Some(1)), 1.0);
+    }
+
+    #[test]
+    fn throttle_chunk_is_bounded_and_panic_free() {
+        assert_eq!(throttle_chunk(f64::INFINITY), MAX_THROTTLE_CHUNK);
+        assert_eq!(throttle_chunk(f64::NAN), MAX_THROTTLE_CHUNK);
+        assert_eq!(throttle_chunk(1e300), MAX_THROTTLE_CHUNK);
+        assert_eq!(throttle_chunk(1000.0), MAX_THROTTLE_CHUNK);
+        assert_eq!(throttle_chunk(30.0), MAX_THROTTLE_CHUNK);
+        assert_eq!(throttle_chunk(2.5), Duration::from_secs_f64(2.5));
+        assert_eq!(throttle_chunk(0.0005), Duration::from_millis(1));
+        assert_eq!(throttle_chunk(0.0), Duration::from_millis(1));
+    }
 
     #[test]
     fn sanitize_rejects_windows_reserved_names() {

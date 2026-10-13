@@ -59,6 +59,7 @@ impl Canned {
 struct MockServer {
     addr: String,
     requests: Arc<Mutex<Vec<(String, String)>>>,
+    times: Arc<Mutex<Vec<Instant>>>,
 }
 
 impl MockServer {
@@ -66,26 +67,38 @@ impl MockServer {
         let listener = TcpListener::bind("127.0.0.1:0").expect("mock listener");
         let addr = format!("http://{}", listener.local_addr().expect("mock addr"));
         let requests = Arc::new(Mutex::new(Vec::new()));
+        let times = Arc::new(Mutex::new(Vec::new()));
         let queue: Arc<Mutex<VecDeque<Canned>>> = Arc::new(Mutex::new(script.into()));
         {
             let requests = requests.clone();
+            let times = times.clone();
             let queue = queue.clone();
             thread::spawn(move || {
                 for incoming in listener.incoming() {
                     let Ok(stream) = incoming else { continue };
                     let requests = requests.clone();
+                    let times = times.clone();
                     let queue = queue.clone();
                     // Поток на соединение: параллельные запросы (tokio::join!)
                     // обслуживаются независимо — без общих пулов и без keep-alive.
-                    thread::spawn(move || handle_connection(stream, requests, queue));
+                    thread::spawn(move || handle_connection(stream, requests, times, queue));
                 }
             });
         }
-        Self { addr, requests }
+        Self {
+            addr,
+            requests,
+            times,
+        }
     }
 
     fn requests(&self) -> Vec<(String, String)> {
         self.requests.lock().unwrap().clone()
+    }
+
+    /// Когда пришли HTTP-запросы (для проверок троттлинга).
+    fn request_times(&self) -> Vec<Instant> {
+        self.times.lock().unwrap().clone()
     }
 
     fn client(&self, extra_env: &[(&str, &str)]) -> McpClient {
@@ -102,6 +115,7 @@ impl MockServer {
 fn handle_connection(
     mut stream: TcpStream,
     requests: Arc<Mutex<Vec<(String, String)>>>,
+    times: Arc<Mutex<Vec<Instant>>>,
     queue: Arc<Mutex<VecDeque<Canned>>>,
 ) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
@@ -142,6 +156,7 @@ fn handle_connection(
     }
 
     requests.lock().unwrap().push((method, url));
+    times.lock().unwrap().push(Instant::now());
 
     let canned = queue.lock().unwrap().pop_front();
     let Some(item) = canned else {
@@ -942,4 +957,117 @@ fn executor_profile_limits_writes() {
         "mutating grouped action must be rejected: {call}"
     );
     assert!(result_text(&call).contains("недоступна"));
+}
+
+#[test]
+fn rps_limits_request_rate_and_logs_throttling() {
+    // WEEEK_RPS=1: пять последовательных вызовов — интервал между HTTP-запросами ≥ 1 с.
+    let script = (0..5).map(|_| Canned::json(r#"{"tasks":[]}"#)).collect();
+    let server = MockServer::start(script);
+    let mut client = server.client(&[("WEEEK_RPS", "1"), ("WEEEK_LOG", "debug")]);
+
+    for _ in 0..5 {
+        let call = client.call_tool("weeek_search_tasks", json!({}));
+        assert_ne!(call["isError"], true, "search must succeed: {call}");
+    }
+
+    let times = server.request_times();
+    assert_eq!(times.len(), 5, "five HTTP requests expected");
+    for pair in times.windows(2) {
+        let gap = pair[1].duration_since(pair[0]);
+        assert!(
+            gap >= Duration::from_millis(900),
+            "1 rps pacing requires ~1 s between requests, got {gap:?}"
+        );
+    }
+    assert!(
+        client.wait_for_stderr("throttle: rps=1", Duration::from_millis(2000)),
+        "debug log must report throttling: {}",
+        client.stderr_snapshot()
+    );
+    let log = client.stderr_snapshot();
+    assert!(
+        log.contains("(delayed 1 of 2 requests)"),
+        "debug log must count delayed requests: {log}"
+    );
+}
+
+#[test]
+fn rps_is_off_for_empty_or_invalid_values() {
+    for value in ["", "0", "-3", "abc"] {
+        let script = (0..3).map(|_| Canned::json(r#"{"tasks":[]}"#)).collect();
+        let server = MockServer::start(script);
+        let mut client = server.client(&[("WEEEK_RPS", value)]);
+
+        for _ in 0..3 {
+            let call = client.call_tool("weeek_search_tasks", json!({}));
+            assert_ne!(call["isError"], true, "search must succeed: {call}");
+        }
+        let times = server.request_times();
+        assert_eq!(times.len(), 3);
+        let total = times[2].duration_since(times[0]);
+        assert!(
+            total < Duration::from_millis(1500),
+            "WEEEK_RPS={value:?} must leave the baseline unthrottled, got {total:?}"
+        );
+    }
+}
+
+#[test]
+fn rps_burst_allows_an_initial_burst() {
+    // rps=20 (50 мс) + burst=2: первые два запроса идут без паузы, дальше — с пейсингом.
+    let script = (0..4).map(|_| Canned::json(r#"{"tasks":[]}"#)).collect();
+    let server = MockServer::start(script);
+    let mut client = server.client(&[("WEEEK_RPS", "20"), ("WEEEK_RPS_BURST", "2")]);
+
+    for _ in 0..4 {
+        let call = client.call_tool("weeek_search_tasks", json!({}));
+        assert_ne!(call["isError"], true, "search must succeed: {call}");
+    }
+
+    let times = server.request_times();
+    assert_eq!(times.len(), 4);
+    let first_gap = times[1].duration_since(times[0]);
+    assert!(
+        first_gap < Duration::from_millis(100),
+        "the burst must not delay the second request: {first_gap:?}"
+    );
+    for pair in times[1..].windows(2) {
+        let gap = pair[1].duration_since(pair[0]);
+        assert!(
+            gap >= Duration::from_millis(30),
+            "after the burst requests are paced at ~50 ms, got {gap:?}"
+        );
+    }
+}
+
+#[test]
+fn retry_after_dominates_the_bucket() {
+    // 429 c Retry-After: 1 при rps=50 (20 мс) — пауза берётся по API, а не по ведру.
+    let server = MockServer::start(vec![
+        Canned {
+            retry_after: Some("1".to_string()),
+            ..Canned::status_json(429, "{}")
+        },
+        Canned::json(r#"{"tasks":[]}"#),
+    ]);
+    let mut client = server.client(&[
+        ("WEEEK_RPS", "50"),
+        ("WEEEK_RPS_BURST", "1"),
+        ("WEEEK_RETRY_BASE_MS", "10"),
+    ]);
+
+    let call = client.call_tool("weeek_search_tasks", json!({}));
+    assert_ne!(
+        call["isError"], true,
+        "retry after 429 must succeed: {call}"
+    );
+
+    let times = server.request_times();
+    assert_eq!(times.len(), 2);
+    let gap = times[1].duration_since(times[0]);
+    assert!(
+        gap >= Duration::from_millis(950),
+        "Retry-After must dominate the bucket interval, got {gap:?}"
+    );
 }

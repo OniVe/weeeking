@@ -1,4 +1,9 @@
+use crate::i18n::{t, tf};
 use std::env;
+
+/// Минимальный осмысленный `WEEEK_RPS`: меньше — ошибка старта (иначе на запрос
+/// приходится ожидание в тысячи секунд). Верхней границы нет.
+pub const MIN_RPS: f64 = 0.001;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -13,6 +18,13 @@ pub struct Config {
     pub deny_actions: Option<Vec<String>>,
     /// Профиль доступа (`WEEEK_PROFILE`), например `executor`; `Some("")` — задан пустым.
     pub profile: Option<String>,
+    /// Клиентский throttle: лимит HTTP-запросов в секунду (`WEEEK_RPS`); None — выключен.
+    pub rps: Option<f64>,
+    /// `WEEEK_RPS` задан, но значение непригодно (нечитаемо или при разборе вырождается
+    /// в 0): fail-closed — ошибка старта с текстом причины.
+    pub rps_invalid: Option<String>,
+    /// Ёмкость всплеска throttle в токенах (`WEEEK_RPS_BURST`); None — `max(1, ceil(RPS))`.
+    pub rps_burst: Option<u32>,
     pub max_chars: usize,
     pub disable_keychain: bool,
     /// Имя записи в системном хранилище (мультиаккаунт), по умолчанию `api-token`.
@@ -93,6 +105,45 @@ impl Config {
         let allow_actions = policy_env("WEEEK_ALLOW_ACTIONS").map(parse_action_list);
         let deny_actions = policy_env("WEEEK_DENY_ACTIONS").map(parse_action_list);
         let profile = policy_env("WEEEK_PROFILE").map(|v| v.trim().to_ascii_lowercase());
+        let (rps, rps_invalid) = match env::var("WEEEK_RPS") {
+            Ok(value) => {
+                let trimmed = value.trim().to_string();
+                match trimmed.parse::<f64>() {
+                    // Пустое/≤0/нечисловое значение — throttle выключен (baseline).
+                    Ok(v) if v.is_finite() && v > 0.0 => (Some(v), None),
+                    // Положительный литерал, схлопнувшийся в 0 (переполнение вниз, напр. 1e-400):
+                    // не тихий «выключен», а ошибка старта.
+                    Ok(v)
+                        if v == 0.0 && trimmed.bytes().any(|b| b.is_ascii_digit() && b != b'0') =>
+                    {
+                        (
+                            None,
+                            Some(tf!(
+                                "значение «{trimmed}» при разборе вырождается в 0",
+                                "value `{trimmed}` underflows to 0 when parsed"
+                            )),
+                        )
+                    }
+                    _ => (None, None),
+                }
+            }
+            Err(env::VarError::NotPresent) => (None, None),
+            // «Задано, но нечитаемо» — не тихий off, а ошибка старта (как у policy-переменных).
+            Err(env::VarError::NotUnicode(_)) => (
+                None,
+                Some(
+                    t!(
+                        "значение нечитаемо (не UTF-8)",
+                        "the value is unreadable (not UTF-8)"
+                    )
+                    .to_string(),
+                ),
+            ),
+        };
+        let rps_burst = env::var("WEEEK_RPS_BURST")
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .filter(|v| *v > 0);
         let max_attachment_bytes = env::var("WEEEK_MAX_ATTACHMENT_BYTES")
             .ok()
             .and_then(|v| v.trim().parse::<usize>().ok())
@@ -125,6 +176,9 @@ impl Config {
             allow_actions,
             deny_actions,
             profile,
+            rps,
+            rps_invalid,
+            rps_burst,
             max_chars,
             disable_keychain,
             keychain_account,

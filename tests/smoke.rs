@@ -244,6 +244,57 @@ fn non_unicode_policy_env_fails_closed() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn non_unicode_rps_fails_startup() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let bad = OsString::from_vec(vec![0xff, 0xfe]);
+    let output = Command::new(env!("CARGO_BIN_EXE_weeeking"))
+        .env("WEEEK_API_TOKEN", "")
+        .env("WEEEK_TOKEN", "")
+        .env("WEEEK_DISABLE_KEYCHAIN", "1")
+        .env("WEEEK_LANG", "ru")
+        .env("READ_ONLY", "true")
+        .env("WEEEK_RPS", bad)
+        .env_remove("WEEEK_RPS_BURST")
+        .output()
+        .expect("run with a non-unicode rps");
+    assert!(
+        !output.status.success(),
+        "non-unicode WEEEK_RPS must fail closed"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("WEEEK_RPS"),
+        "stderr must name the variable: {stderr}"
+    );
+}
+
+#[test]
+fn tiny_rps_fails_startup() {
+    let output = Command::new(env!("CARGO_BIN_EXE_weeeking"))
+        .env("WEEEK_API_TOKEN", "")
+        .env("WEEEK_TOKEN", "")
+        .env("WEEEK_DISABLE_KEYCHAIN", "1")
+        .env("WEEEK_LANG", "ru")
+        .env("READ_ONLY", "true")
+        .env("WEEEK_RPS", "1e-30")
+        .env_remove("WEEEK_RPS_BURST")
+        .output()
+        .expect("run with a tiny rps");
+    assert!(
+        !output.status.success(),
+        "a tiny WEEEK_RPS must fail startup instead of hanging requests"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("WEEEK_RPS"),
+        "stderr must name the variable: {stderr}"
+    );
+}
+
 #[test]
 fn mcp_surface_follows_weeek_lang() {
     let mut client = McpClient::start(&[("WEEEK_LANG", "en")]);

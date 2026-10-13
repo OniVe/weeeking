@@ -103,6 +103,8 @@ A binary downloaded through a browser on macOS may be quarantined by Gatekeeper 
 | `WEEEK_MAX_ATTACHMENT_BYTES` | `67108864` (64 MiB) | Attachment download limit (protects against huge responses). |
 | `WEEEK_RETRY_MAX` | `2` | Extra attempts on 429, 502/503/504 and network failures (0–5); timeouts are not retried. |
 | `WEEEK_RETRY_BASE_MS` | `300` | Exponential backoff base (capped at 5 s; `Retry-After` is honored, capped at 30 s). |
+| `WEEEK_RPS` | — | Client-side request rate limit in requests per second (token bucket; retries included). Empty/≤0 disables it; `0 < RPS < 0.001` is a startup error. |
+| `WEEEK_RPS_BURST` | `ceil(RPS)`, min 1 | Burst capacity in tokens. |
 | `WEEEK_LOG` | — | `debug` — verbose HTTP logs to stderr (method, path, status, ms; the token is never logged). |
 
 ### Where the token comes from
@@ -222,6 +224,34 @@ A tool is available only when **all** of its operations are allowed (for `weeek_
 `get-boards`/`get-board-columns` fetches are checked separately, when `projectId`/`boardId` are
 passed). Admin groups (`weeek_project`, `weeek_task`, …) filter their `action` list: the available
 operations are listed in the tool description.
+
+## Coexistence with other consumers
+
+Weeek does not publish its request limits, and they appear to be shared per workspace. When several
+consumers work side by side (weeeking instances, a synchronizer service, scripts), the budget can be
+smoothed out:
+
+- `WEEEK_RPS` — client-side request rate limit for this instance (token bucket): it applies to all
+  HTTP requests, retries included; `Retry-After` is not overridden — the pause is never shorter than
+  the API asks for;
+- `WEEEK_RPS_BURST` — burst allowance in tokens: by default "one second of budget" (`ceil(RPS)`,
+  at least 1) — a short batch fits into a second without extra pacing; if parallel fetches must
+  not slow down under a small `RPS`, set the burst manually;
+- the throttle is off by default; an empty or ≤0 value disables it as well (baseline unchanged).
+  Values below `0.001` are rejected at startup (otherwise a single request would wait for
+  thousands of seconds).
+
+Sharing the budget across instances: split `WEEEK_RPS` between them manually, or put a common
+throttling proxy in front of the API and point `WEEEK_BASE_URL` at it — then the limit is enforced
+globally.
+
+```bash
+# Strict mode for a synchronizer service: 1 request/s without bursts
+READ_ONLY=false WEEEK_RPS=1 WEEEK_RPS_BURST=1 weeeking
+
+# Interactive instance: 4 requests/s on average, bursts up to 8
+WEEEK_RPS=4 WEEEK_RPS_BURST=8 weeeking
+```
 
 ## Setup (OpenCode)
 

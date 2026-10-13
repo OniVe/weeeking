@@ -34,6 +34,8 @@ impl McpClient {
             .env_remove("WEEEK_RETRY_MAX")
             .env_remove("WEEEK_RETRY_BASE_MS")
             .env_remove("WEEEK_MAX_ATTACHMENT_BYTES")
+            .env_remove("WEEEK_RPS")
+            .env_remove("WEEEK_RPS_BURST")
             .env_remove("WEEEK_LOG")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

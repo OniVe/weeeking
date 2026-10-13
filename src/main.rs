@@ -26,7 +26,7 @@ const HELP_RU: &str = "🛡️  Weeeking — MCP-сервер для Weeek (по
      Основные переменные: READ_ONLY=true|false, WEEEK_LANG=ru|en, WEEEK_BASE_URL,\n\
      WEEEK_TIMEOUT_MS, WEEEK_MAX_RESPONSE_CHARS, WEEEK_DISABLE_KEYCHAIN=1, WEEEK_KEYCHAIN_ACCOUNT.\n\
      Ограничение операций: WEEEK_ALLOW_ACTIONS / WEEEK_DENY_ACTIONS (operationId или маски: delete-*),\n\
-     WEEEK_PROFILE=executor.";
+     WEEEK_PROFILE=executor. Троттлинг: WEEEK_RPS (запросов/с, включая ретраи), WEEEK_RPS_BURST.";
 
 const HELP_EN: &str = "🛡️  Weeeking — an MCP server for Weeek (full API, Weeek and conquer).\n\
      \n\
@@ -42,7 +42,7 @@ const HELP_EN: &str = "🛡️  Weeeking — an MCP server for Weeek (full API, 
      Main variables: READ_ONLY=true|false, WEEEK_LANG=ru|en, WEEEK_BASE_URL,\n\
      WEEEK_TIMEOUT_MS, WEEEK_MAX_RESPONSE_CHARS, WEEEK_DISABLE_KEYCHAIN=1, WEEEK_KEYCHAIN_ACCOUNT.\n\
      Operation filtering: WEEEK_ALLOW_ACTIONS / WEEEK_DENY_ACTIONS (operationId or masks: delete-*),\n\
-     WEEEK_PROFILE=executor.";
+     WEEEK_PROFILE=executor. Rate limiting: WEEEK_RPS (requests/s, retries included), WEEEK_RPS_BURST.";
 
 fn print_usage() {
     println!("{}", i18n::t!(HELP_RU, HELP_EN));
@@ -91,6 +91,29 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cfg = config::Config::from_env();
+    if let Some(problem) = &cfg.rps_invalid {
+        eprintln!(
+            "{}",
+            i18n::tf!(
+                "Ошибка конфигурации: WEEEK_RPS — {problem}.",
+                "Configuration error: WEEEK_RPS — {problem}."
+            )
+        );
+        std::process::exit(2);
+    }
+    if let Some(rps) = cfg.rps
+        && rps < config::MIN_RPS
+    {
+        let min_rps = config::MIN_RPS;
+        eprintln!(
+            "{}",
+            i18n::tf!(
+                "Ошибка конфигурации: WEEEK_RPS={rps:e} слишком мал — минимум {min_rps} запросов/с (или уберите переменную).",
+                "Configuration error: WEEEK_RPS={rps:e} is too small — the minimum is {min_rps} requests/s (or remove the variable)."
+            )
+        );
+        std::process::exit(2);
+    }
     let policy = match access::Policy::from_config(&cfg) {
         Ok(policy) => policy,
         Err(message) => {

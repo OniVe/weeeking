@@ -78,6 +78,18 @@
           "isSecret": false
         },
         {
+          "name": "WEEEK_RPS",
+          "description": "Client-side request rate limit in requests per second (token bucket, retries included). Empty or <=0 disables it; values below 0.001 are rejected at startup.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "WEEEK_RPS_BURST",
+          "description": "Burst capacity in tokens (default: ceil(RPS), at least 1).",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
           "name": "WEEEK_LOG",
           "description": "debug — verbose HTTP logs to stderr (no token).",
           "isRequired": false,
