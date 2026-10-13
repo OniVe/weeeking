@@ -5,6 +5,14 @@ pub struct Config {
     pub base_url: String,
     pub timeout_ms: u64,
     pub read_only: bool,
+    /// Белый список операций (`WEEEK_ALLOW_ACTIONS`): operationId и маски через `*`.
+    /// `None` — переменная не задана; `Some(vec![])` — задана пустой (ошибка старта).
+    pub allow_actions: Option<Vec<String>>,
+    /// Чёрный список операций (`WEEEK_DENY_ACTIONS`): вычитается из белого/полного.
+    /// `None` — не задана; `Some(vec![])` — задана пустой (ошибка старта).
+    pub deny_actions: Option<Vec<String>>,
+    /// Профиль доступа (`WEEEK_PROFILE`), например `executor`; `Some("")` — задан пустым.
+    pub profile: Option<String>,
     pub max_chars: usize,
     pub disable_keychain: bool,
     /// Имя записи в системном хранилище (мультиаккаунт), по умолчанию `api-token`.
@@ -25,6 +33,28 @@ pub fn keychain_account_from(value: Option<String>) -> String {
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
         .unwrap_or_else(|| "api-token".to_string())
+}
+
+/// Разбирает список операций: разделители — запятые и пробелы; регистр — нижний; дубликаты убираются.
+pub fn parse_action_list(value: String) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for part in value.split(|c: char| c == ',' || c.is_whitespace()) {
+        let part = part.trim().to_ascii_lowercase();
+        if !part.is_empty() && !out.contains(&part) {
+            out.push(part);
+        }
+    }
+    out
+}
+
+/// Читает policy-переменную: `NotPresent` → «не задана»; `NotUnicode` → «задана пустой»
+/// (fail-closed: политика завершит старт ошибкой с именем переменной).
+fn policy_env(var: &str) -> Option<String> {
+    match env::var(var) {
+        Ok(value) => Some(value),
+        Err(env::VarError::NotPresent) => None,
+        Err(env::VarError::NotUnicode(_)) => Some(String::new()),
+    }
 }
 
 impl Config {
@@ -60,6 +90,9 @@ impl Config {
             "1" | "true" | "yes"
         );
         let keychain_account = keychain_account_from(env::var("WEEEK_KEYCHAIN_ACCOUNT").ok());
+        let allow_actions = policy_env("WEEEK_ALLOW_ACTIONS").map(parse_action_list);
+        let deny_actions = policy_env("WEEEK_DENY_ACTIONS").map(parse_action_list);
+        let profile = policy_env("WEEEK_PROFILE").map(|v| v.trim().to_ascii_lowercase());
         let max_attachment_bytes = env::var("WEEEK_MAX_ATTACHMENT_BYTES")
             .ok()
             .and_then(|v| v.trim().parse::<usize>().ok())
@@ -89,6 +122,9 @@ impl Config {
             base_url,
             timeout_ms,
             read_only,
+            allow_actions,
+            deny_actions,
+            profile,
             max_chars,
             disable_keychain,
             keychain_account,
@@ -102,7 +138,7 @@ impl Config {
 
 #[cfg(test)]
 mod tests {
-    use super::keychain_account_from;
+    use super::{keychain_account_from, parse_action_list};
 
     #[test]
     fn account_defaults_to_api_token() {
@@ -116,6 +152,16 @@ mod tests {
         assert_eq!(
             keychain_account_from(Some("  api-token-anna ".into())),
             "api-token-anna"
+        );
+    }
+
+    #[test]
+    fn action_list_splits_normalizes_and_dedupes() {
+        assert_eq!(parse_action_list(String::new()), Vec::<String>::new());
+        assert_eq!(parse_action_list("  ".into()), Vec::<String>::new());
+        assert_eq!(
+            parse_action_list("Delete-*, create-task,delete-*,\tget-tasks\n".into()),
+            vec!["delete-*", "create-task", "get-tasks"]
         );
     }
 }

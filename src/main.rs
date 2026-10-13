@@ -1,3 +1,4 @@
+mod access;
 mod config;
 mod curated;
 mod generated;
@@ -23,7 +24,9 @@ const HELP_RU: &str = "🛡️  Weeeking — MCP-сервер для Weeek (по
      Windows Credential Manager / macOS Keychain / Linux Secret Service).\n\
      \n\
      Основные переменные: READ_ONLY=true|false, WEEEK_LANG=ru|en, WEEEK_BASE_URL,\n\
-     WEEEK_TIMEOUT_MS, WEEEK_MAX_RESPONSE_CHARS, WEEEK_DISABLE_KEYCHAIN=1, WEEEK_KEYCHAIN_ACCOUNT.";
+     WEEEK_TIMEOUT_MS, WEEEK_MAX_RESPONSE_CHARS, WEEEK_DISABLE_KEYCHAIN=1, WEEEK_KEYCHAIN_ACCOUNT.\n\
+     Ограничение операций: WEEEK_ALLOW_ACTIONS / WEEEK_DENY_ACTIONS (operationId или маски: delete-*),\n\
+     WEEEK_PROFILE=executor.";
 
 const HELP_EN: &str = "🛡️  Weeeking — an MCP server for Weeek (full API, Weeek and conquer).\n\
      \n\
@@ -37,7 +40,9 @@ const HELP_EN: &str = "🛡️  Weeeking — an MCP server for Weeek (full API, 
      Windows Credential Manager / macOS Keychain / Linux Secret Service).\n\
      \n\
      Main variables: READ_ONLY=true|false, WEEEK_LANG=ru|en, WEEEK_BASE_URL,\n\
-     WEEEK_TIMEOUT_MS, WEEEK_MAX_RESPONSE_CHARS, WEEEK_DISABLE_KEYCHAIN=1, WEEEK_KEYCHAIN_ACCOUNT.";
+     WEEEK_TIMEOUT_MS, WEEEK_MAX_RESPONSE_CHARS, WEEEK_DISABLE_KEYCHAIN=1, WEEEK_KEYCHAIN_ACCOUNT.\n\
+     Operation filtering: WEEEK_ALLOW_ACTIONS / WEEEK_DENY_ACTIONS (operationId or masks: delete-*),\n\
+     WEEEK_PROFILE=executor.";
 
 fn print_usage() {
     println!("{}", i18n::t!(HELP_RU, HELP_EN));
@@ -86,20 +91,50 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let cfg = config::Config::from_env();
+    let policy = match access::Policy::from_config(&cfg) {
+        Ok(policy) => policy,
+        Err(message) => {
+            eprintln!(
+                "{}",
+                i18n::tf!(
+                    "Ошибка политики доступа: {message}",
+                    "Access policy error: {message}"
+                )
+            );
+            std::process::exit(2);
+        }
+    };
+    for warning in &policy.warnings {
+        eprintln!("[weeeking] {warning}");
+    }
+    if cfg.log_debug {
+        eprintln!("[weeeking] access policy: {}", policy.describe_debug());
+    }
+    let access_description = policy.describe();
     let (token_value, source) = token::resolve(&cfg);
     let client = http::WeeekClient::new(&cfg, token_value);
-    let server = server::WeeekingServer::new(client, cfg.read_only, cfg.max_chars);
+    let server = server::WeeekingServer::new(client, policy, cfg.max_chars);
+    if server.tools_count() == 0 {
+        eprintln!(
+            "[weeeking] {}",
+            i18n::t!(
+                "Политика доступа не оставила ни одного инструмента — проверьте WEEEK_ALLOW_ACTIONS/WEEEK_DENY_ACTIONS.",
+                "The access policy left no tools available — check WEEEK_ALLOW_ACTIONS/WEEEK_DENY_ACTIONS."
+            )
+        );
+    }
 
     eprintln!(
         "{}",
         i18n::tf!(
-            "[weeeking] готов. Спека: {} (chunk {}), {} операций — {}. READ_ONLY={}, токен: {}, API {}",
-            "[weeeking] ready. Spec: {} (chunk {}), {} operations — {}. READ_ONLY={}, token: {}, API {}",
+            "[weeeking] готов. Спека: {} (chunk {}), {} операций — {}. READ_ONLY={}, доступ: {}, токен: {}, API {}",
+            "[weeeking] ready. Spec: {} (chunk {}), {} operations — {}. READ_ONLY={}, access: {}, token: {}, API {}",
             spec::SPEC_TITLE,
             spec::SPEC_VERSION,
             spec::OPERATIONS.len(),
             spec::SPEC_URL,
             cfg.read_only,
+            access_description,
             source.describe(),
             cfg.base_url
         )

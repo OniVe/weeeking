@@ -164,6 +164,87 @@ fn cli_help_and_errors_follow_weeek_lang() {
 }
 
 #[test]
+fn unknown_action_pattern_fails_startup() {
+    let output = Command::new(env!("CARGO_BIN_EXE_weeeking"))
+        .env("WEEEK_API_TOKEN", "")
+        .env("WEEEK_TOKEN", "")
+        .env("WEEEK_DISABLE_KEYCHAIN", "1")
+        .env("WEEEK_LANG", "ru")
+        .env("READ_ONLY", "false")
+        .env("WEEEK_ALLOW_ACTIONS", "create-task,delete-everything")
+        .env_remove("WEEEK_DENY_ACTIONS")
+        .env_remove("WEEEK_PROFILE")
+        .output()
+        .expect("run with a bad allow list");
+    assert!(
+        !output.status.success(),
+        "unknown pattern must fail startup (fail-closed)"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("delete-everything"),
+        "stderr must name the bad pattern: {stderr}"
+    );
+    assert!(
+        stderr.contains("WEEEK_ALLOW_ACTIONS"),
+        "stderr must name the source: {stderr}"
+    );
+}
+
+#[test]
+fn empty_allow_list_fails_startup() {
+    let output = Command::new(env!("CARGO_BIN_EXE_weeeking"))
+        .env("WEEEK_API_TOKEN", "")
+        .env("WEEEK_TOKEN", "")
+        .env("WEEEK_DISABLE_KEYCHAIN", "1")
+        .env("WEEEK_LANG", "ru")
+        .env("READ_ONLY", "false")
+        .env("WEEEK_ALLOW_ACTIONS", "   ")
+        .env_remove("WEEEK_DENY_ACTIONS")
+        .env_remove("WEEEK_PROFILE")
+        .output()
+        .expect("run with an empty allow list");
+    assert!(
+        !output.status.success(),
+        "an explicitly empty allow list must fail startup (fail-closed)"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("WEEEK_ALLOW_ACTIONS"),
+        "stderr must name the variable: {stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn non_unicode_policy_env_fails_closed() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let bad = OsString::from_vec(vec![0xff, 0xfe]);
+    let output = Command::new(env!("CARGO_BIN_EXE_weeeking"))
+        .env("WEEEK_API_TOKEN", "")
+        .env("WEEEK_TOKEN", "")
+        .env("WEEEK_DISABLE_KEYCHAIN", "1")
+        .env("WEEEK_LANG", "ru")
+        .env("READ_ONLY", "false")
+        .env("WEEEK_ALLOW_ACTIONS", bad)
+        .env_remove("WEEEK_DENY_ACTIONS")
+        .env_remove("WEEEK_PROFILE")
+        .output()
+        .expect("run with a non-unicode allow list");
+    assert!(
+        !output.status.success(),
+        "non-unicode WEEEK_ALLOW_ACTIONS must fail closed"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("WEEEK_ALLOW_ACTIONS"),
+        "stderr must name the variable: {stderr}"
+    );
+}
+
+#[test]
 fn mcp_surface_follows_weeek_lang() {
     let mut client = McpClient::start(&[("WEEEK_LANG", "en")]);
     let tools = client.list_tools();

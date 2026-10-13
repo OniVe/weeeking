@@ -1,3 +1,4 @@
+use crate::access::Policy;
 use crate::curated;
 use crate::generated;
 use crate::http::WeeekClient;
@@ -12,37 +13,90 @@ use rmcp::model::{
 use rmcp::service::RequestContext;
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use serde_json::{Map, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::Instant;
 
 pub struct WeeekingServer {
     pub(crate) client: WeeekClient,
-    pub(crate) read_only: bool,
+    pub(crate) policy: Policy,
     pub(crate) max_chars: usize,
     tools: Vec<Tool>,
     group_ops: HashMap<String, Vec<String>>,
+    curated_names: HashSet<String>,
     pub(crate) context_cache: Mutex<Option<(Instant, Value)>>,
 }
 
 impl WeeekingServer {
-    pub fn new(client: WeeekClient, read_only: bool, max_chars: usize) -> Self {
-        let (gen_tools, group_ops) = generated::build(read_only);
+    pub fn new(client: WeeekClient, policy: Policy, max_chars: usize) -> Self {
+        let (gen_tools, group_ops) = generated::build(&policy);
+        let curated_tools = curated::tools(&policy);
+        let curated_names = curated_tools
+            .iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
         let mut tools = gen_tools;
-        tools.extend(curated::tools(read_only));
+        tools.extend(curated_tools);
 
         Self {
             client,
-            read_only,
+            policy,
             max_chars,
             tools,
             group_ops,
+            curated_names,
             context_cache: Mutex::new(None),
         }
     }
 
+    /// Ошибка политики доступа для операции (fail-closed).
+    pub(crate) fn policy_error(&self, op_id: &str) -> String {
+        tf!(
+            "Операция «{op_id}» запрещена политикой доступа (WEEEK_ALLOW_ACTIONS/WEEEK_DENY_ACTIONS/WEEEK_PROFILE).",
+            "Operation `{op_id}` is blocked by the access policy (WEEEK_ALLOW_ACTIONS/WEEEK_DENY_ACTIONS/WEEEK_PROFILE)."
+        )
+    }
+
+    /// Ресурсы читают общий контекст: политика должна разрешать все пять операций.
+    fn ensure_context_allowed(&self) -> Result<(), McpError> {
+        for op_id in [
+            "get-profile",
+            "get-workspace",
+            "get-workspace-members",
+            "get-tags",
+            "get-projects",
+        ] {
+            if !self.policy.allows_id(op_id) {
+                return Err(McpError::internal_error(self.policy_error(op_id), None));
+            }
+        }
+        Ok(())
+    }
+
+    /// Контекст доступен, если политика разрешает все пять его операций.
+    fn context_available(&self) -> bool {
+        self.ensure_context_allowed().is_ok()
+    }
+
+    /// Промпт доступен, если доступны инструменты, на которые он опирается.
+    fn prompt_available(&self, name: &str) -> bool {
+        match name {
+            "my-tasks-today" => {
+                self.curated_names.contains("weeek_context")
+                    && self.curated_names.contains("weeek_search_tasks")
+            }
+            "week-review" => self.curated_names.contains("weeek_search_tasks"),
+            _ => false,
+        }
+    }
+
+    /// Количество зарегистрированных инструментов (диагностика пустой поверхности).
+    pub(crate) fn tools_count(&self) -> usize {
+        self.tools.len()
+    }
+
     async fn dispatch(&self, name: &str, args: Map<String, Value>) -> CallToolResult {
-        if curated::is_curated(name, self.read_only) {
+        if self.curated_names.contains(name) {
             return self.curated_run(name, args).await;
         }
         if let Some(allowed) = self.group_ops.get(name).cloned() {
@@ -60,6 +114,19 @@ impl WeeekingServer {
 
 impl ServerHandler for WeeekingServer {
     fn get_info(&self) -> ServerConfig {
+        let instructions = if self.context_available() {
+            t!(
+                "Weeeking — полный API Weeek (задачи, проекты, доски, CRM, время, поля). Начните с weeek_context. \
+                 Контекст доступен и как ресурсы: weeek://me, weeek://projects.",
+                "Weeeking — the full Weeek API (tasks, projects, boards, CRM, time, fields). Start with weeek_context. \
+                 The context is also available as resources: weeek://me, weeek://projects."
+            )
+        } else {
+            t!(
+                "Weeeking — API Weeek. Политика доступа ограничивает набор операций: часть инструментов, ресурсов и промптов скрыта (WEEEK_ALLOW_ACTIONS/WEEEK_DENY_ACTIONS/WEEEK_PROFILE).",
+                "Weeeking — the Weeek API. The access policy limits the operation set: some tools, resources and prompts are hidden (WEEEK_ALLOW_ACTIONS/WEEEK_DENY_ACTIONS/WEEEK_PROFILE)."
+            )
+        };
         ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
@@ -68,12 +135,7 @@ impl ServerHandler for WeeekingServer {
                 .build(),
         )
         .with_server_info(Implementation::new("weeeking", env!("CARGO_PKG_VERSION")))
-        .with_instructions(t!(
-            "Weeeking — полный API Weeek (задачи, проекты, доски, CRM, время, поля). Начните с weeek_context. \
-             Контекст доступен и как ресурсы: weeek://me, weeek://projects.",
-            "Weeeking — the full Weeek API (tasks, projects, boards, CRM, time, fields). Start with weeek_context. \
-             The context is also available as resources: weeek://me, weeek://projects."
-        ))
+        .with_instructions(instructions)
     }
 
     async fn list_tools(
@@ -98,22 +160,28 @@ impl ServerHandler for WeeekingServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, McpError> {
-        Ok(ListResourcesResult::with_all_items(vec![
-            Resource::new("weeek://me", "me")
-                .with_title(t!("Пользователь", "User"))
-                .with_description(t!(
-                    "Текущий пользователь Weeek (user из weeek_context)",
-                    "Current Weeek user (user from weeek_context)"
-                ))
-                .with_mime_type("application/json"),
-            Resource::new("weeek://projects", "projects")
-                .with_title(t!("Проекты", "Projects"))
-                .with_description(t!(
-                    "Проекты воркспейса (projects из weeek_context)",
-                    "Workspace projects (projects from weeek_context)"
-                ))
-                .with_mime_type("application/json"),
-        ]))
+        let mut resources = Vec::new();
+        if self.context_available() {
+            resources.push(
+                Resource::new("weeek://me", "me")
+                    .with_title(t!("Пользователь", "User"))
+                    .with_description(t!(
+                        "Текущий пользователь Weeek (user из weeek_context)",
+                        "Current Weeek user (user from weeek_context)"
+                    ))
+                    .with_mime_type("application/json"),
+            );
+            resources.push(
+                Resource::new("weeek://projects", "projects")
+                    .with_title(t!("Проекты", "Projects"))
+                    .with_description(t!(
+                        "Проекты воркспейса (projects из weeek_context)",
+                        "Workspace projects (projects from weeek_context)"
+                    ))
+                    .with_mime_type("application/json"),
+            );
+        }
+        Ok(ListResourcesResult::with_all_items(resources))
     }
 
     async fn read_resource(
@@ -122,14 +190,18 @@ impl ServerHandler for WeeekingServer {
         _context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, McpError> {
         let value = match request.uri.as_str() {
-            "weeek://me" => self
-                .context_cached(false)
-                .await
-                .map(|context| context.get("me").cloned().unwrap_or(Value::Null)),
-            "weeek://projects" => self
-                .context_cached(false)
-                .await
-                .map(|context| context.get("projects").cloned().unwrap_or(Value::Null)),
+            "weeek://me" => {
+                self.ensure_context_allowed()?;
+                self.context_cached(false)
+                    .await
+                    .map(|context| context.get("me").cloned().unwrap_or(Value::Null))
+            }
+            "weeek://projects" => {
+                self.ensure_context_allowed()?;
+                self.context_cached(false)
+                    .await
+                    .map(|context| context.get("projects").cloned().unwrap_or(Value::Null))
+            }
             other => {
                 return Err(McpError::invalid_params(
                     tf!("Неизвестный ресурс: {other}", "Unknown resource: {other}"),
@@ -154,26 +226,34 @@ impl ServerHandler for WeeekingServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListPromptsResult, McpError> {
-        Ok(ListPromptsResult::with_all_items(vec![
-            Prompt::new(
-                "my-tasks-today",
-                Some(t!(
-                    "Мои задачи на сегодня: собрать и предложить план дня",
-                    "My tasks today: gather them and propose a plan for the day"
-                )),
-                None,
-            )
-            .with_title(t!("Мои задачи на сегодня", "My tasks today")),
-            Prompt::new(
-                "week-review",
-                Some(t!(
-                    "Итоги недели: завершённое, обсуждения, дедлайны",
-                    "Week review: completed work, discussions, deadlines"
-                )),
-                None,
-            )
-            .with_title(t!("Итоги недели", "Week review")),
-        ]))
+        let mut prompts = Vec::new();
+        if self.prompt_available("my-tasks-today") {
+            prompts.push(
+                Prompt::new(
+                    "my-tasks-today",
+                    Some(t!(
+                        "Мои задачи на сегодня: собрать и предложить план дня",
+                        "My tasks today: gather them and propose a plan for the day"
+                    )),
+                    None,
+                )
+                .with_title(t!("Мои задачи на сегодня", "My tasks today")),
+            );
+        }
+        if self.prompt_available("week-review") {
+            prompts.push(
+                Prompt::new(
+                    "week-review",
+                    Some(t!(
+                        "Итоги недели: завершённое, обсуждения, дедлайны",
+                        "Week review: completed work, discussions, deadlines"
+                    )),
+                    None,
+                )
+                .with_title(t!("Итоги недели", "Week review")),
+            );
+        }
+        Ok(ListPromptsResult::with_all_items(prompts))
     }
 
     async fn get_prompt(
@@ -181,6 +261,13 @@ impl ServerHandler for WeeekingServer {
         request: GetPromptRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<GetPromptResponse, McpError> {
+        if !self.prompt_available(&request.name) {
+            let name = request.name.as_str();
+            return Err(McpError::invalid_params(
+                tf!("Неизвестный промпт: {name}", "Unknown prompt: {name}"),
+                None,
+            ));
+        }
         let text = match request.name.as_str() {
             "my-tasks-today" => t!(MY_TASKS_TODAY_RU, MY_TASKS_TODAY_EN),
             "week-review" => t!(WEEK_REVIEW_RU, WEEK_REVIEW_EN),

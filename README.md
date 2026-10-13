@@ -90,6 +90,9 @@ Linux x64 gnu/musl, Linux arm64, macOS arm64/x64) из GitHub Releases этой 
 | --- | --- | --- |
 | `WEEEK_API_TOKEN` | — | Токен из Weeek (Настройки workspace → API). Без него чтения невозможны. |
 | `READ_ONLY` | `true` | `false`/`0` — открыть изменяющие операции (создание, правка, удаление, CRM). |
+| `WEEEK_ALLOW_ACTIONS` | — | Белый список операций (operationId или маски `*`): всё, что не перечислено (включая чтения), запрещено. Несовместим с `WEEEK_PROFILE`. |
+| `WEEEK_DENY_ACTIONS` | — | Чёрный список операций (или масок: `delete-*`): не вызываются и не показываются. Сильнее белого списка и профиля. |
+| `WEEEK_PROFILE` | — | Профиль доступа: `executor` — чтения плюс создание задач и комментариев. |
 | `WEEEK_LANG` | `ru` | Язык пользовательских текстов (`ru`/`en`): справка, описания инструментов, промпты, ошибки. |
 | `WEEEK_BASE_URL` | `https://api.weeek.net/public/v1` | Свой прокси/хост при необходимости. |
 | `WEEEK_TIMEOUT_MS` | `30000` | Таймаут запроса. |
@@ -160,6 +163,64 @@ weeeking                                запустить MCP-сервер (std
 weeeking store-token [--account <имя>]  сохранить токен в системное хранилище
 weeeking --help                         справка
 ```
+
+## Ограничение операций
+
+`READ_ONLY` — грубый переключатель: `false` открывает весь изменяющий API. Тоньше доступ
+настраивается фильтром операций (по `operationId` из OpenAPI):
+
+- **`WEEEK_DENY_ACTIONS`** — чёрный список: перечисленные операции (или маски: `delete-*`)
+  не вызываются и не показываются в описаниях инструментов;
+- **`WEEEK_ALLOW_ACTIONS`** — абсолютный белый список: всё, что не перечислено (включая чтения),
+  запрещено; несовместим с `WEEEK_PROFILE`;
+- **`WEEEK_PROFILE=executor`** — готовый узкий профиль: чтения плюс `create-task` и
+  `create-task-comment` (создание задачи и комментария; без изменений и удалений).
+
+Семантика: `READ_ONLY=true` сильнее списков и профиля (они игнорируются с предупреждением);
+`WEEEK_DENY_ACTIONS` сильнее `WEEEK_ALLOW_ACTIONS` и профиля. Fail-closed: пустое значение
+`WEEEK_ALLOW_ACTIONS`/`WEEEK_DENY_ACTIONS` и маска, не совпавшая ни с одной операцией OpenAPI,
+останавливают сервер с ошибкой при старте; под `READ_ONLY=true` такие настройки игнорируются,
+но о проблеме сообщается предупреждением. Списки разделяются запятыми и/или пробелами;
+`*` в маске — любая подстрока.
+
+Запрещённые действия не рекламируются в `tools/list` (действие исчезает из `action`-enum,
+инструмент — из списка) и отклоняются при вызове с типизированной ошибкой. Ресурсы, промпты
+и серверная инструкция тоже следуют политике: если контекст (`weeek_context` и ресурсы
+`weeek://me`, `weeek://projects`) недоступен, он не рекламируется и не читается, а промпты,
+опирающиеся на скрытые инструменты, пропадают из `prompts/list`.
+
+```bash
+# Запретить все удаления, остальное оставить:
+READ_ONLY=false WEEEK_DENY_ACTIONS="delete-*" weeeking
+
+# Узкий исполнитель: чтения, создание задач и комментариев:
+READ_ONLY=false WEEEK_PROFILE=executor weeeking
+
+# Явный белый список (абсолютный — чтения тоже перечисляются):
+READ_ONLY=false WEEEK_ALLOW_ACTIONS="get-tasks,get-task,get-task-comments,create-task,create-task-comment" weeeking
+```
+
+Соответствие curated-инструментов операциям OpenAPI:
+
+| Инструмент | Операции |
+| --- | --- |
+| `weeek_context` | `get-profile`, `get-workspace`, `get-workspace-members`, `get-tags`, `get-projects` (+`get-boards`, `get-board-columns` при аргументах `projectId`/`boardId`) |
+| `weeek_search_tasks` | `get-tasks` |
+| `weeek_get_task` | `get-task`, `get-task-comments` |
+| `weeek_list_comments` | `get-task-comments` |
+| `weeek_download_attachment` | `get-attachment` |
+| `weeek_create_task` | `create-task` |
+| `weeek_update_task` | `update-task` |
+| `weeek_move_task` | `change-task-board`, `change-task-board-column` |
+| `weeek_complete_task` | `complete-task`, `uncomplete-task` |
+| `weeek_set_task_people` | `add-assignees-to-task`, `remove-assignees-from-task`, `add-watchers-to-task`, `remove-watchers-from-task` |
+| `weeek_add_comment` | `create-task-comment` |
+| `weeek_delete_comment` | `delete-task-comment` |
+
+Инструмент доступен, только если разрешены **все** его операции (у `weeek_context` дополнительные
+выборки `get-boards`/`get-board-columns` проверяются отдельно — при передаче `projectId`/`boardId`).
+Админ-группы (`weeek_project`, `weeek_task`, …) фильтруют `action`-список: доступные операции
+перечислены в описании инструмента.
 
 ## Подключение (OpenCode)
 

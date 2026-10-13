@@ -1,3 +1,4 @@
+use crate::access::Policy;
 use crate::i18n::{t, tf};
 use crate::server::WeeekingServer;
 use crate::util::*;
@@ -5,26 +6,53 @@ use rmcp::model::{CallToolResult, Tool, ToolAnnotations};
 use serde_json::{Map, Value, json};
 use std::time::Duration;
 
-pub const READ_TOOLS: &[&str] = &[
-    "weeek_context",
-    "weeek_search_tasks",
-    "weeek_get_task",
-    "weeek_list_comments",
-    "weeek_download_attachment",
+/// Операции OpenAPI, которые выполняет каждый curated-инструмент (для политики доступа).
+///
+/// Инструмент доступен, когда политика разрешает **все** его операции.
+/// `weeek_context` дополнительно вызывает `get-boards`/`get-board-columns` при аргументах
+/// `projectId`/`boardId` — эти вызовы проверяются отдельно (fail-closed).
+const TOOL_OPS: &[(&str, &[&str])] = &[
+    (
+        "weeek_context",
+        &[
+            "get-profile",
+            "get-workspace",
+            "get-workspace-members",
+            "get-tags",
+            "get-projects",
+        ],
+    ),
+    ("weeek_search_tasks", &["get-tasks"]),
+    ("weeek_get_task", &["get-task", "get-task-comments"]),
+    ("weeek_list_comments", &["get-task-comments"]),
+    ("weeek_download_attachment", &["get-attachment"]),
+    ("weeek_create_task", &["create-task"]),
+    ("weeek_update_task", &["update-task"]),
+    (
+        "weeek_move_task",
+        &["change-task-board", "change-task-board-column"],
+    ),
+    ("weeek_complete_task", &["complete-task", "uncomplete-task"]),
+    (
+        "weeek_set_task_people",
+        &[
+            "add-assignees-to-task",
+            "remove-assignees-from-task",
+            "add-watchers-to-task",
+            "remove-watchers-from-task",
+        ],
+    ),
+    ("weeek_add_comment", &["create-task-comment"]),
+    ("weeek_delete_comment", &["delete-task-comment"]),
 ];
 
-pub const WRITE_TOOLS: &[&str] = &[
-    "weeek_create_task",
-    "weeek_update_task",
-    "weeek_move_task",
-    "weeek_complete_task",
-    "weeek_set_task_people",
-    "weeek_add_comment",
-    "weeek_delete_comment",
-];
-
-pub fn is_curated(name: &str, read_only: bool) -> bool {
-    READ_TOOLS.contains(&name) || (!read_only && WRITE_TOOLS.contains(&name))
+/// Инструмент доступен, если политика разрешает все его операции.
+fn tool_allowed(name: &str, policy: &Policy) -> bool {
+    TOOL_OPS
+        .iter()
+        .find(|(tool, _)| *tool == name)
+        .map(|(_, ops)| ops.iter().all(|op| policy.allows_id(op)))
+        .unwrap_or(false)
 }
 
 fn tool(
@@ -102,7 +130,7 @@ fn extract_list(value: &Value, key: &str) -> Vec<Value> {
     }
 }
 
-pub fn tools(read_only: bool) -> Vec<Tool> {
+pub fn tools(policy: &Policy) -> Vec<Tool> {
     let mut out = vec![
         tool(
             "weeek_context",
@@ -220,10 +248,6 @@ pub fn tools(read_only: bool) -> Vec<Tool> {
             ann(true, false, true),
         ),
     ];
-
-    if read_only {
-        return out;
-    }
 
     out.extend([
         tool(
@@ -351,6 +375,7 @@ pub fn tools(read_only: bool) -> Vec<Tool> {
         ),
     ]);
 
+    out.retain(|tool| tool_allowed(&tool.name, policy));
     out
 }
 
@@ -427,6 +452,9 @@ impl WeeekingServer {
             .as_object_mut()
             .ok_or_else(|| t!("контекст повреждён", "the context is corrupted").to_string())?;
         if let Some(project_id) = arg_i64(args, "projectId") {
+            if !self.policy.allows_id("get-boards") {
+                return Err(self.policy_error("get-boards"));
+            }
             let query = vec![("projectId".to_string(), project_id.to_string())];
             let boards = self
                 .client
@@ -436,6 +464,9 @@ impl WeeekingServer {
             object.insert("boards".into(), unwrap_key(boards, "boards"));
         }
         if let Some(board_id) = arg_i64(args, "boardId") {
+            if !self.policy.allows_id("get-board-columns") {
+                return Err(self.policy_error("get-board-columns"));
+            }
             let query = vec![("boardId".to_string(), board_id.to_string())];
             let columns = self
                 .client
@@ -884,5 +915,73 @@ impl WeeekingServer {
             )
             .await
             .map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TOOL_OPS, tools};
+    use crate::access::Policy;
+    use crate::config::Config;
+    use crate::spec::{CURATED, find_operation};
+    use std::collections::HashSet;
+
+    fn full_policy() -> Policy {
+        Policy::from_config(&Config {
+            base_url: "http://localhost".into(),
+            timeout_ms: 1_000,
+            read_only: false,
+            allow_actions: None,
+            deny_actions: None,
+            profile: None,
+            max_chars: 10_000,
+            disable_keychain: true,
+            keychain_account: "api-token".into(),
+            max_attachment_bytes: 1024,
+            retry_max: 0,
+            retry_base_ms: 10,
+            log_debug: false,
+        })
+        .expect("policy")
+    }
+
+    #[test]
+    fn tool_ops_cover_exactly_the_curated_operations() {
+        let mapped: HashSet<&str> = TOOL_OPS
+            .iter()
+            .flat_map(|(_, ops)| ops.iter().copied())
+            .collect();
+        let curated: HashSet<&str> = CURATED.iter().copied().collect();
+        assert_eq!(
+            mapped, curated,
+            "TOOL_OPS must map exactly the curated operations"
+        );
+        for (tool, ops) in TOOL_OPS.iter() {
+            assert!(!ops.is_empty(), "{tool} must map at least one operation");
+            for op in ops.iter() {
+                assert!(
+                    find_operation(op).is_some(),
+                    "{tool}: unknown operation {op}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_built_tool_is_described_in_tool_ops() {
+        let policy = full_policy();
+        let built: HashSet<String> = tools(&policy)
+            .iter()
+            .map(|tool| tool.name.to_string())
+            .collect();
+        let mapped: HashSet<&str> = TOOL_OPS.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            built.len(),
+            mapped.len(),
+            "built tools and TOOL_OPS must agree: {built:?} vs {mapped:?}"
+        );
+        for name in &mapped {
+            assert!(built.contains(*name), "{name} missing from the built tools");
+        }
     }
 }

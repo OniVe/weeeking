@@ -1,3 +1,4 @@
+use crate::access::Policy;
 use crate::http::WeeekClient;
 use crate::i18n::{t, tf};
 use crate::server::WeeekingServer;
@@ -9,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 /// Builds one tool per API tag with an `action` parameter and returns the
 /// dispatch map (tool name -> allowed operation ids).
-pub fn build(read_only: bool) -> (Vec<Tool>, HashMap<String, Vec<String>>) {
+pub fn build(policy: &Policy) -> (Vec<Tool>, HashMap<String, Vec<String>>) {
     let mut tools = Vec::new();
     let mut dispatch = HashMap::new();
 
@@ -19,11 +20,7 @@ pub fn build(read_only: bool) -> (Vec<Tool>, HashMap<String, Vec<String>>) {
             .iter()
             .filter_map(|id| find_operation(id))
             .collect();
-        let ops: Vec<&OpDef> = all
-            .iter()
-            .copied()
-            .filter(|op| !read_only || op.method == "GET")
-            .collect();
+        let ops: Vec<&OpDef> = all.iter().copied().filter(|op| policy.allows(op)).collect();
         if ops.is_empty() {
             continue;
         }
@@ -39,10 +36,17 @@ pub fn build(read_only: bool) -> (Vec<Tool>, HashMap<String, Vec<String>>) {
             description.push('\n');
         }
         if hidden > 0 {
-            description.push_str(&tf!(
-                "(Режим READ_ONLY: скрыто изменяющих операций — {hidden}. Включите READ_ONLY=false, чтобы они появились.)",
-                "(READ_ONLY mode: {hidden} mutating operations are hidden. Set READ_ONLY=false to expose them.)"
-            ));
+            if policy.read_only() {
+                description.push_str(&tf!(
+                    "(Режим READ_ONLY: скрыто изменяющих операций — {hidden}. Включите READ_ONLY=false, чтобы они появились.)",
+                    "(READ_ONLY mode: {hidden} mutating operations are hidden. Set READ_ONLY=false to expose them.)"
+                ));
+            } else {
+                description.push_str(&tf!(
+                    "(Политика доступа: скрыто операций — {hidden}. Настраивается WEEEK_ALLOW_ACTIONS / WEEEK_DENY_ACTIONS / WEEEK_PROFILE.)",
+                    "(Access policy: {hidden} operations are hidden. Configured via WEEEK_ALLOW_ACTIONS / WEEEK_DENY_ACTIONS / WEEEK_PROFILE.)"
+                ));
+            }
         }
 
         let action_ids: Vec<&str> = ops.iter().map(|op| op.id).collect();
@@ -158,8 +162,8 @@ impl WeeekingServer {
         })?;
         if !allowed.iter().any(|id| id == &action) {
             return Err(tf!(
-                "Операция «{action}» недоступна (проверьте список action в описании инструмента и режим READ_ONLY).",
-                "Operation `{action}` is not available (check the action list in the tool description and the READ_ONLY mode)."
+                "Операция «{action}» недоступна (проверьте список action в описании инструмента, режим READ_ONLY и настройки доступа).",
+                "Operation `{action}` is not available (check the action list in the tool description, the READ_ONLY mode and the access policy)."
             ));
         }
         let op = find_operation(&action).ok_or_else(|| {

@@ -91,6 +91,9 @@ A binary downloaded through a browser on macOS may be quarantined by Gatekeeper 
 | --- | --- | --- |
 | `WEEEK_API_TOKEN` | — | Weeek API token (workspace Settings → API). Reads are impossible without it. |
 | `READ_ONLY` | `true` | `false`/`0` — enable mutating operations (create, update, delete, CRM). |
+| `WEEEK_ALLOW_ACTIONS` | — | Absolute allow list of operations (operationId or `*` masks): anything not listed (reads included) is forbidden. Cannot be combined with `WEEEK_PROFILE`. |
+| `WEEEK_DENY_ACTIONS` | — | Deny list of operations (or masks: `delete-*`): never called and never advertised. Wins over the allow list and the profile. |
+| `WEEEK_PROFILE` | — | Access profile: `executor` — reads plus task and comment creation. |
 | `WEEEK_LANG` | `ru` | Language of user-facing texts (`ru`/`en`): help, tool descriptions, prompts, errors. |
 | `WEEEK_BASE_URL` | `https://api.weeek.net/public/v1` | Custom proxy/host if needed. |
 | `WEEEK_TIMEOUT_MS` | `30000` | Request timeout. |
@@ -161,6 +164,64 @@ weeeking                                run the MCP server (stdio)
 weeeking store-token [--account <name>] save the token to the system keychain
 weeeking --help                         show help
 ```
+
+## Restricting operations
+
+`READ_ONLY` is a coarse switch: `false` exposes the whole mutating API. For finer control use
+the operation filter (operation ids from the OpenAPI spec):
+
+- **`WEEEK_DENY_ACTIONS`** — deny list: the listed operations (or masks: `delete-*`) are neither
+  callable nor advertised in tool descriptions;
+- **`WEEEK_ALLOW_ACTIONS`** — absolute allow list: anything not listed (reads included) is
+  forbidden; cannot be combined with `WEEEK_PROFILE`;
+- **`WEEEK_PROFILE=executor`** — a ready narrow profile: reads plus `create-task` and
+  `create-task-comment` (task and comment creation; no updates or deletes).
+
+Semantics: `READ_ONLY=true` wins over lists and the profile (they are ignored with a warning);
+`WEEEK_DENY_ACTIONS` wins over `WEEEK_ALLOW_ACTIONS` and the profile. Fail-closed: an empty
+`WEEEK_ALLOW_ACTIONS`/`WEEEK_DENY_ACTIONS` value or a mask that matches no OpenAPI operation
+stops startup with an error; under `READ_ONLY=true` such settings are ignored, but a warning
+reports the problem. Lists are separated by commas and/or whitespace; `*` in a mask matches any
+substring.
+
+Denied actions are not advertised in `tools/list` (the action disappears from the `action` enum,
+the tool from the list) and are rejected on call with a typed error. Resources, prompts and the
+server instructions follow the policy too: when the context (`weeek_context` and the
+`weeek://me`, `weeek://projects` resources) is unavailable, it is not advertised or readable,
+and prompts that rely on hidden tools disappear from `prompts/list`.
+
+```bash
+# Deny every delete, keep everything else:
+READ_ONLY=false WEEEK_DENY_ACTIONS="delete-*" weeeking
+
+# Narrow executor: reads, task and comment creation:
+READ_ONLY=false WEEEK_PROFILE=executor weeeking
+
+# Explicit allow list (absolute — reads must be listed too):
+READ_ONLY=false WEEEK_ALLOW_ACTIONS="get-tasks,get-task,get-task-comments,create-task,create-task-comment" weeeking
+```
+
+Curated tool → OpenAPI operation mapping:
+
+| Tool | Operations |
+| --- | --- |
+| `weeek_context` | `get-profile`, `get-workspace`, `get-workspace-members`, `get-tags`, `get-projects` (+`get-boards`, `get-board-columns` with the `projectId`/`boardId` arguments) |
+| `weeek_search_tasks` | `get-tasks` |
+| `weeek_get_task` | `get-task`, `get-task-comments` |
+| `weeek_list_comments` | `get-task-comments` |
+| `weeek_download_attachment` | `get-attachment` |
+| `weeek_create_task` | `create-task` |
+| `weeek_update_task` | `update-task` |
+| `weeek_move_task` | `change-task-board`, `change-task-board-column` |
+| `weeek_complete_task` | `complete-task`, `uncomplete-task` |
+| `weeek_set_task_people` | `add-assignees-to-task`, `remove-assignees-from-task`, `add-watchers-to-task`, `remove-watchers-from-task` |
+| `weeek_add_comment` | `create-task-comment` |
+| `weeek_delete_comment` | `delete-task-comment` |
+
+A tool is available only when **all** of its operations are allowed (for `weeek_context` the extra
+`get-boards`/`get-board-columns` fetches are checked separately, when `projectId`/`boardId` are
+passed). Admin groups (`weeek_project`, `weeek_task`, …) filter their `action` list: the available
+operations are listed in the tool description.
 
 ## Setup (OpenCode)
 

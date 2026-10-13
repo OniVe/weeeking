@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{McpClient, result_text};
+use common::{McpClient, result_text, tool_names};
 use serde_json::{Value, json};
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -719,4 +719,227 @@ fn resources_read_from_context_cache() {
         5,
         "контекст закэширован после первого чтения"
     );
+}
+
+/// Действия (`action`-enum) админ-группы из tools/list.
+fn tool_actions(tools: &[Value], name: &str) -> Vec<String> {
+    tools
+        .iter()
+        .find(|tool| tool["name"] == name)
+        .map(|tool| {
+            tool["inputSchema"]["properties"]["action"]["enum"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect()
+}
+
+#[test]
+fn deny_actions_hide_and_reject() {
+    let server = MockServer::start(vec![]);
+    let mut client = server.client(&[
+        ("READ_ONLY", "false"),
+        ("WEEEK_DENY_ACTIONS", "delete-*,get-workspace-members"),
+    ]);
+
+    let tools = client.list_tools();
+    let names = tool_names(&tools);
+    assert!(
+        !names.contains(&"weeek_delete_comment".to_string()),
+        "denied write tool must be hidden: {names:?}"
+    );
+    assert!(
+        !names.contains(&"weeek_context".to_string()),
+        "context needs get-workspace-members, must be hidden: {names:?}"
+    );
+    assert!(names.contains(&"weeek_search_tasks".to_string()));
+
+    let actions = tool_actions(&tools, "weeek_tags");
+    assert!(
+        !actions.contains(&"delete-tag".to_string()),
+        "denied action must not be advertised: {actions:?}"
+    );
+    assert!(actions.contains(&"get-tag".to_string()));
+
+    let call = client.call_tool(
+        "weeek_tags",
+        json!({ "action": "delete-tag", "params": { "id": 1 } }),
+    );
+    assert_eq!(
+        call["isError"], true,
+        "denied action must be rejected on call: {call}"
+    );
+    let text = result_text(&call);
+    assert!(
+        text.contains("недоступна"),
+        "typed policy error expected: {text}"
+    );
+
+    let response = client.request("resources/read", json!({ "uri": "weeek://me" }));
+    let message = response["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("запрещена политикой доступа"),
+        "resource read must be blocked by the policy: {response}"
+    );
+
+    assert!(
+        client.list_resources().is_empty(),
+        "resources must not be advertised while the context is blocked"
+    );
+    let prompts = client.list_prompts();
+    let prompt_names: Vec<&str> = prompts
+        .iter()
+        .filter_map(|prompt| prompt["name"].as_str())
+        .collect();
+    assert_eq!(
+        prompt_names,
+        vec!["week-review"],
+        "prompts depending on hidden tools must not be advertised: {prompts:?}"
+    );
+    let hidden_prompt = client.request("prompts/get", json!({ "name": "my-tasks-today" }));
+    assert!(
+        hidden_prompt.get("error").is_some(),
+        "hidden prompt must be rejected: {hidden_prompt}"
+    );
+}
+
+#[test]
+fn context_extra_fetches_are_policy_guarded() {
+    let full = r#"{"success":true,"user":{"id":"u1"},"workspace":{"id":1},"members":[],"tags":[],"projects":[]}"#;
+    let server = MockServer::start(vec![
+        Canned::json(full),
+        Canned::json(full),
+        Canned::json(full),
+        Canned::json(full),
+        Canned::json(full),
+    ]);
+    let mut client = server.client(&[
+        ("READ_ONLY", "false"),
+        ("WEEEK_DENY_ACTIONS", "get-boards,get-board-columns"),
+    ]);
+
+    let names = tool_names(&client.list_tools());
+    assert!(
+        names.contains(&"weeek_context".to_string()),
+        "context stays visible (get-boards is only an extra fetch): {names:?}"
+    );
+
+    let call = client.call_tool("weeek_context", json!({ "projectId": 7 }));
+    assert_eq!(
+        call["isError"], true,
+        "denied get-boards must block the projectId argument: {call}"
+    );
+    let text = result_text(&call);
+    assert!(
+        text.contains("get-boards"),
+        "policy error names the op: {text}"
+    );
+    assert_eq!(
+        server.requests().len(),
+        5,
+        "the boards request must not be sent: {:?}",
+        server.requests()
+    );
+
+    // Контекст закэширован — второй вызов проверяет защиту board-columns без новых запросов.
+    let call = client.call_tool("weeek_context", json!({ "boardId": 9 }));
+    assert_eq!(call["isError"], true);
+    let text = result_text(&call);
+    assert!(
+        text.contains("get-board-columns"),
+        "policy error names the op: {text}"
+    );
+    assert_eq!(server.requests().len(), 5);
+}
+
+#[test]
+fn allow_actions_narrow_scope() {
+    let server = MockServer::start(vec![Canned::json(r#"{"success":true,"task":{"id":1}}"#)]);
+    let mut client = server.client(&[
+        ("READ_ONLY", "false"),
+        (
+            "WEEEK_ALLOW_ACTIONS",
+            "get-tasks, create-task, create-task-comment",
+        ),
+    ]);
+
+    let mut names = tool_names(&client.list_tools());
+    names.sort();
+    assert_eq!(
+        names,
+        vec![
+            "weeek_add_comment",
+            "weeek_create_task",
+            "weeek_search_tasks"
+        ],
+        "allow-list must narrow the whole surface"
+    );
+
+    let call = client.call_tool("weeek_create_task", json!({ "title": "t", "projectId": 1 }));
+    assert_ne!(call["isError"], true, "allowed write must work: {call}");
+
+    let hidden = client.call_tool(
+        "weeek_delete_comment",
+        json!({ "taskId": 1, "commentId": 1 }),
+    );
+    assert_eq!(
+        hidden["isError"], true,
+        "hidden curated tool must be rejected: {hidden}"
+    );
+    let text = result_text(&hidden);
+    assert!(
+        text.contains("Неизвестный инструмент"),
+        "hidden curated tool must read as unknown: {text}"
+    );
+}
+
+#[test]
+fn executor_profile_limits_writes() {
+    let server = MockServer::start(vec![]);
+    let mut client = server.client(&[("READ_ONLY", "false"), ("WEEEK_PROFILE", "executor")]);
+    let tools = client.list_tools();
+    let names = tool_names(&tools);
+
+    for present in [
+        "weeek_context",
+        "weeek_search_tasks",
+        "weeek_create_task",
+        "weeek_add_comment",
+    ] {
+        assert!(
+            names.contains(&present.to_string()),
+            "executor keeps {present}: {names:?}"
+        );
+    }
+    for hidden in [
+        "weeek_update_task",
+        "weeek_move_task",
+        "weeek_complete_task",
+        "weeek_set_task_people",
+        "weeek_delete_comment",
+    ] {
+        assert!(
+            !names.contains(&hidden.to_string()),
+            "executor hides {hidden}: {names:?}"
+        );
+    }
+
+    let actions = tool_actions(&tools, "weeek_tags");
+    assert!(actions.contains(&"get-tag".to_string()));
+    assert!(!actions.contains(&"create-tag".to_string()));
+    assert!(!actions.contains(&"delete-tag".to_string()));
+
+    let call = client.call_tool(
+        "weeek_tags",
+        json!({ "action": "create-tag", "params": { "title": "x" } }),
+    );
+    assert_eq!(
+        call["isError"], true,
+        "mutating grouped action must be rejected: {call}"
+    );
+    assert!(result_text(&call).contains("недоступна"));
 }
